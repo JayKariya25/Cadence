@@ -1,0 +1,35 @@
+# Local development stack for Cadence.
+#
+# Phase 0 runs MongoDB only; the Next.js app and the realtime server run on the
+# host via `npm run dev` so hot reload stays instant. Phase 8 adds `app` and
+# `realtime` services here under a compose profile, which is why the file is
+# already namespaced and volume-backed.
+
+name: cadence
+
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: cadence-mongo
+    restart: unless-stopped
+    ports:
+      # Deliberately not 27017. A Homebrew or system mongod bound to
+      # 127.0.0.1:27017 wins over a container bound to the wildcard address, so
+      # "localhost:27017" silently reaches the host's database instead of this
+      # one — same connection string, wrong server, no error anywhere. Mapping
+      # to 27018 makes the project's database unambiguous. If you have no local
+      # MongoDB, "27017:27017" works too; change MONGODB_URI to match.
+      - "27018:27017"
+    volumes:
+      # A named volume, not a bind mount: the database survives
+      # `docker compose down` and never lands inside the repository.
+      - cadence-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  cadence-mongo-data:
