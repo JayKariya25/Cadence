@@ -31,7 +31,9 @@ import {
 import { allModels } from "@/models";
 import { MOODS, type Mood } from "@/lib/moods";
 
-const DEFAULT_TARGET = 500;
+// Sized so each of the sixteen mood rows gets a full complement rather
+// than a thin handful.
+const DEFAULT_TARGET = 1000;
 /** Jamendo's own per-request ceiling is 200; 70 keeps each response small. */
 const PAGE_SIZE = 70;
 /** Guards against paging forever through a mood the catalogue is thin on. */

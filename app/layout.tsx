@@ -79,6 +79,15 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               </span>
             </Link>
 
+            <nav className="flex items-center gap-1">
+              <Link
+                href="/search"
+                className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
+              >
+                Search
+              </Link>
+            </nav>
+
             {userId && (
               <nav className="hidden items-center gap-1 sm:flex">
                 <Link

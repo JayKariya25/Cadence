@@ -1,7 +1,7 @@
 # Cadence — specification
 
 The source of truth for this project. Phases amend this file rather than
-re-deriving intent. Last updated at the end of **Phase 2** (2026-09-11).
+re-deriving intent. Last updated at the end of **Phase 3** (2026-09-11).
 
 ---
 
@@ -220,7 +220,7 @@ convenience, never the authorisation boundary.
 | `app/api/auth/[...nextauth]` | 2 | ✅ Auth.js handler |
 | `app/api/plays` | 2 | ✅ Records a PlayEvent; also the `sendBeacon` target |
 | `app/api/playlists/[playlistId]/cover` | 2 | ✅ GridFS cover, visibility re-checked |
-| `app/api/search` | 3 | Tracks/artists/albums/playlists + the discovery rail |
+| `app/api/search` | 3 | ✅ Tracks/artists/albums/playlists + the discovery rail |
 | `app/api/recommendations` | 4 | Scored feed with reason strings |
 | `app/api/stats` | 5 | Aggregation-pipeline analytics |
 | `proxy.ts` | 2 | ✅ Route protection — **Next 16 renamed `middleware.ts` to `proxy.ts`**, and it now runs on the Node.js runtime |
@@ -264,11 +264,15 @@ convenience, never the authorisation boundary.
       serving, public/private toggle, recently played from PlayEvent
       aggregation. Play events are recorded from real listening time, flushed
       on track change and via `sendBeacon` on `pagehide`.
-- [ ] **Phase 3 — Search-Scoped Discovery.** 300ms debounce, `AbortController`
-      cancellation, min 2 chars, tabbed results, the related rail below
-      non-empty results only, shared-tag explanations, `relevance >= 0.35`,
-      dedupe, cap 12, `SimilarCache`, `SearchQuery`, tag-overlap fallback,
-      `source: 'search'` on plays.
+- [x] **Phase 3 — Search-Scoped Discovery.** 300ms debounce (nine keystrokes
+      produce one request), `AbortController` cancellation, two-character
+      minimum, tabbed results, the related rail below non-empty results only
+      and nowhere else, IDF-ranked shared-tag explanations on every card,
+      `relevance >= 0.35`, seed-artist exclusion, dedupe, cap 12, `SearchQuery`
+      recent searches, `source: 'search'` on plays. Guarded permanently by
+      `e2e/search-scoped-discovery.spec.ts`, which fails if a rail ever appears
+      outside search. **See D23: `/tracks/similar` returns nothing, so the
+      documented fallback is the live mechanism.**
 - [ ] **Phase 4 — Recommendation engine.** tagAffinity from PlayEvent with
       completion weighting and 30-day half-life decay, cosine scoring, 20%
       exploration quota, reason strings, cold-start taste picker, unit tests.
@@ -416,6 +420,34 @@ reaches the `JWT` interface and `token.uid` silently stays `unknown`.
 top-level option was removed, so covers store their MIME type in the file
 document's metadata and the serving route reads it back from there.
 
+**D23 — Jamendo's `/tracks/similar` returns no results, for any seed.** Tested
+against dozens of ids including Jamendo's most popular tracks: the endpoint
+answers HTTP 200 with `status: "success"`, `code: 0` and `results_count: 0`. It
+is not a malformed request — a bad `id` produces a proper `status: "failed"`,
+`code: 3` with an error message — the free tier simply has no similarity data.
+The spec named this endpoint as the engine of Search-Scoped Discovery, so the
+documented graceful-degradation path is now the live one. The Jamendo call is
+still attempted first and its result still cached, so the feature would light
+up unchanged if the endpoint ever returns data.
+
+**D24 — Local similarity is IDF-weighted, not a raw tag count.** Two tracks
+sharing "instrumental" tells you almost nothing; two sharing "klezmer" tells
+you a great deal. Every tag gets an inverse-document-frequency weight from the
+catalogue, MongoDB does the filtering and coarse ranking with `$setIntersection`
+and `$size`, and the final score is the share of the seed's total tag
+informativeness the candidate accounts for — which keeps it on the same 0-1
+scale as Jamendo's relevancy, so the 0.35 threshold means one thing on both
+paths. The same weighting orders the shared tags shown on each card, so the
+visible reason reads "shares: klezmer, balkan, world" rather than "shares:
+instrumental, neutral, happy".
+
+**D25 — Sixteen mood rows, eight of them regional.** A catalogue seeded only on
+ambient, electronic and rock reads as a stock-music library. Jamendo's tag
+vocabulary is not guessable — "indian", "african", "balkan", "flamenco",
+"oriental", "japanese", "latin" and "reggae" all return results; "asian",
+"tabla" and "reggaeton" return nothing — so every tag was verified against the
+live API before being seeded.
+
 ---
 
 ## 9. Known limitations
@@ -428,9 +460,12 @@ document's metadata and the serving route reads it back from there.
 - **Catalogue size drifts above the target on repeated seeds.** `--limit` caps
   what one run contributes per mood, not the total the collection holds. A
   clean clone gets exactly 8 × 63 = 504.
-- **`relevance` on `/tracks/similar` is not documented as guaranteed.** The
-  schema treats it as optional; Phase 3 will fall back to a rank-derived score
-  rather than dropping a usable recommendation.
+- **`SimilarCache` is currently always empty.** It is written only on the
+  Jamendo path, which returns nothing (D23). The local path is a single indexed
+  aggregation, so caching it would buy little.
+- **The Playlists search tab searches Cadence playlists, not Jamendo's.**
+  Searching a music app should search that app's own content; Jamendo's
+  `/playlists` client exists in `lib/jamendo.ts` but is not surfaced.
 - **Anonymous listening is not recorded.** `/api/plays` answers 204 and stores
   nothing when nobody is signed in, so the client never has to special-case a
   signed-out beacon.

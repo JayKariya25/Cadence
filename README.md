@@ -4,9 +4,9 @@ A music streaming app where **recommendations appear on intent, not by
 default**. Built on the Jamendo Creative Commons catalogue, so the audio is
 full-length and legally streamable.
 
-> **Status: Phase 2 of 8 complete.** You can sign in, play music, save what you
-> like, and build playlists. Search-Scoped Discovery — the feature this project
-> exists for — is Phase 3. This README is expanded into the project's main surface
+> **Status: Phase 3 of 8 complete.** Search-Scoped Discovery — the feature this
+> project exists for — is live. Sign in, play music, save what you like, build
+> playlists, and search to see the one place Cadence recommends anything. This README is expanded into the project's main surface
 > (demo GIFs, architecture diagram, algorithm explanation) in Phase 8. See
 > [SPEC.md](SPEC.md) for the full specification and phase checklist.
 
@@ -29,6 +29,11 @@ full-length and legally streamable.
   toggle, and cover images stored in MongoDB GridFS — no external image host.
 - **Recently played**, built from real listening time rather than "the track
   was loaded".
+- **Search-Scoped Discovery** — tabbed results for tracks, artists, albums and
+  playlists, and beneath them a `Related to "…"` rail that exists on no other
+  screen. Every card names the tags that earned it a place.
+- **1,067 tracks across sixteen mood rows**, half of them regional: Indian,
+  Latin, African, East Asian, Balkan, Reggae, Flamenco and Middle Eastern.
 
 ---
 
@@ -89,6 +94,36 @@ Open <http://localhost:3000>.
 | `npm run test:e2e` | Playwright suite, including the audio analyser gate |
 
 ---
+
+## The one opinion this project has
+
+Spotify recommends at you on every surface. Cadence recommends in exactly one
+place: below a set of non-empty search results, because typing a query is the
+moment you actually said what you wanted.
+
+That is easy to state and easy to erode — one "you might also like" rail added
+to the home page "for consistency" and the project stops having a point. So it
+is enforced by a test: `e2e/search-scoped-discovery.spec.ts` fails if a related
+rail ever appears on the home page, an artist page, or an empty search.
+
+**How the rail is built.** The top-ranked track result becomes the seed. Its own
+artist is excluded, so the rail reads as discovery rather than more of the same
+record. Candidates are scored, filtered at a relevance of 0.35, deduplicated
+against the results already on screen, and capped at twelve.
+
+**Why the reason is visible.** Every card says what it shares — `shares:
+klezmer, balkan, world`. Those tags are ordered by inverse document frequency,
+because two tracks sharing "instrumental" tells you almost nothing while two
+sharing "klezmer" tells you a great deal. The same weighting drives the score
+itself, so the rail ranks on informativeness rather than on raw tag overlap.
+
+**An honest note about the data source.** The specification called for Jamendo's
+`/tracks/similar` endpoint. It returns `status: "success"` with zero results
+for every seed tested, including Jamendo's most popular tracks — the free tier
+has no similarity data. Cadence still calls it first and still caches what it
+returns, but the fallback path — an IDF-weighted tag-overlap aggregation over
+the local catalogue — is what actually powers the feature today. The rail is
+labelled identically either way, because a listener should not have to care.
 
 ## Architecture notes
 
@@ -152,7 +187,7 @@ vector the entire recommendation engine is built on.
 | 0 | Foundation: Docker Mongo, models, Jamendo client, seed | ✅ |
 | 1 | Audio proxy, Zustand player, persistent player bar, catalogue pages | ✅ |
 | 2 | Auth, likes, playlists, GridFS covers, recently played | ✅ |
-| 3 | **Search-Scoped Discovery** | — |
+| 3 | **Search-Scoped Discovery** | ✅ |
 | 4 | Explainable recommendation engine | — |
 | 5 | Listening stats from aggregation pipelines | — |
 | 6 | **Listen-together rooms** | — |

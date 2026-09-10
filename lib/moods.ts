@@ -17,6 +17,15 @@ export interface Mood {
   readonly tags: readonly string[];
 }
 
+/**
+ * Eight moods by feel, then eight by musical tradition.
+ *
+ * The regional rows exist because a catalogue seeded only on ambient,
+ * electronic and rock reads as a stock-music library. Every tag below was
+ * verified to return results against the live API — Jamendo's vocabulary is
+ * not guessable ("indian" and "african" work; "asian" and "tabla" return
+ * nothing at all).
+ */
 export const MOODS: readonly Mood[] = [
   {
     slug: "focus",
@@ -65,6 +74,54 @@ export const MOODS: readonly Mood[] = [
     label: "Beats & Bars",
     blurb: "Boom bap through to trap",
     tags: ["hiphop", "beats"],
+  },
+  {
+    slug: "india",
+    label: "Sounds of India",
+    blurb: "Sitar, tabla and film-score melody",
+    tags: ["indian"],
+  },
+  {
+    slug: "latin",
+    label: "Latin & Brazilian",
+    blurb: "Samba, bossa nova and everything with hips",
+    tags: ["latin"],
+  },
+  {
+    slug: "african",
+    label: "African Currents",
+    blurb: "Polyrhythm, kora and afrobeat",
+    tags: ["african"],
+  },
+  {
+    slug: "eastasia",
+    label: "East Asian",
+    blurb: "Koto, shakuhachi and modern Tokyo",
+    tags: ["japanese"],
+  },
+  {
+    slug: "balkan",
+    label: "Balkan & Klezmer",
+    blurb: "Brass, odd time signatures, no apologies",
+    tags: ["balkan"],
+  },
+  {
+    slug: "reggae",
+    label: "Reggae & Dub",
+    blurb: "Offbeat guitar and a lot of reverb",
+    tags: ["reggae"],
+  },
+  {
+    slug: "flamenco",
+    label: "Flamenco & Mediterranean",
+    blurb: "Nylon strings and hand claps",
+    tags: ["flamenco"],
+  },
+  {
+    slug: "oriental",
+    label: "Middle Eastern",
+    blurb: "Oud, maqam and desert air",
+    tags: ["oriental"],
   },
 ] as const;
 
