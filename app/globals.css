@@ -1,0 +1,149 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/*
+  Cadence is a dark-only product: there is no light theme to toggle to.
+  The palette therefore lives on :root, and <html> still carries `dark`
+  so shadcn's `dark:` variants (which key off `.dark`) resolve correctly.
+*/
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* Cadence-specific tokens. `brand` is deliberately NOT shadcn's `--accent`,
+     which is a muted hover surface; keeping them separate avoids a collision
+     where a hover state would suddenly paint itself signal rose. */
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-surface: var(--card);
+  --color-surface-2: var(--surface-2);
+  --color-hairline: var(--border);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-archivo);
+  --font-heading: var(--font-archivo);
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Ground and surfaces — near-black, lifted in two steps only. */
+  --background: #0a0a0b;
+  --foreground: #e9e7ef;
+  --card: #131316;
+  --card-foreground: #e9e7ef;
+  --popover: #16161a;
+  --popover-foreground: #e9e7ef;
+  --surface-2: #1a1a20;
+
+  /* Signal rose: the single accent. Not Spotify green, not SoundCloud
+     orange, not YouTube red, not Tidal cyan, not Deezer purple. */
+  --brand: #ff3d9a;
+  --brand-hover: #ff62ad;
+  --brand-soft: rgb(255 61 154 / 12%);
+  --primary: #ff3d9a;
+  --primary-foreground: #0a0a0b;
+  --ring: #ff3d9a;
+
+  --secondary: #1a1a20;
+  --secondary-foreground: #e9e7ef;
+  --muted: #1a1a20;
+  --muted-foreground: #a6a2b2;
+  --accent: #22222a;
+  --accent-foreground: #e9e7ef;
+  --destructive: #ff5c5c;
+  --border: #262630;
+  --input: #2a2a34;
+
+  /* Chart ramp for the Phase 5 stats page: rose through violet to teal,
+     chosen so adjacent series stay distinguishable in greyscale too. */
+  --chart-1: #ff3d9a;
+  --chart-2: #c05cff;
+  --chart-3: #6e7bff;
+  --chart-4: #34d0c3;
+  --chart-5: #ffb35c;
+
+  --radius: 0.625rem;
+
+  --sidebar: #0d0d0f;
+  --sidebar-foreground: #e9e7ef;
+  --sidebar-primary: #ff3d9a;
+  --sidebar-primary-foreground: #0a0a0b;
+  --sidebar-accent: #1a1a20;
+  --sidebar-accent-foreground: #e9e7ef;
+  --sidebar-border: #262630;
+  --sidebar-ring: #ff3d9a;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: var(--brand);
+    color: var(--primary-foreground);
+  }
+}
+
+@utility display {
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+  font-stretch: 110%;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+/* Timecodes, durations and counters must not jitter as digits change. */
+@utility numeric {
+  font-variant-numeric: tabular-nums;
+}
