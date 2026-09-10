@@ -5,6 +5,11 @@ import { Toaster } from "@/components/ui/sonner";
 import { AudioEngine } from "@/components/player/audio-engine";
 import { PlayerBar } from "@/components/player/player-bar";
 import { KeyboardShortcuts } from "@/components/player/keyboard-shortcuts";
+import { PlaybackReporter } from "@/components/player/playback-reporter";
+import { AccountMenu, SignedOutActions } from "@/components/auth/account-menu";
+import { LikesHydrator } from "@/components/library/likes-hydrator";
+import { auth } from "@/lib/auth";
+import { getLikedTrackIds } from "@/lib/library";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -42,7 +47,13 @@ export const viewport: Viewport = {
   colorScheme: "dark",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const session = await auth();
+  const userId = session?.user?.id;
+  // Fetched once per navigation so every like button — including the player
+  // bar's, which has no server render of its own — knows its state on first
+  // paint instead of flickering from unliked to liked.
+  const likedIds = userId ? await getLikedTrackIds(userId) : [];
   return (
     <html
       lang="en"
@@ -56,15 +67,46 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         */}
         <AudioEngine />
         <KeyboardShortcuts />
+        <PlaybackReporter signedIn={Boolean(userId)} />
+        <LikesHydrator ids={likedIds} signedIn={Boolean(userId)} />
 
         <header className="sticky top-0 z-20 border-b border-hairline bg-background/80 backdrop-blur">
-          <div className="mx-auto flex w-full max-w-[1600px] items-center gap-3 px-5 py-3 sm:px-8">
-            <Link href="/" className="flex items-center gap-2.5">
+          <div className="mx-auto flex w-full max-w-[1600px] items-center gap-4 px-5 py-3 sm:px-8">
+            <Link href="/" className="flex shrink-0 items-center gap-2.5">
               <span aria-hidden className="h-5 w-1.5 rounded-full bg-brand" />
               <span className="display text-sm uppercase tracking-[0.22em]">
                 Cadence
               </span>
             </Link>
+
+            {userId && (
+              <nav className="hidden items-center gap-1 sm:flex">
+                <Link
+                  href="/liked"
+                  className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
+                >
+                  Liked Songs
+                </Link>
+                <Link
+                  href="/library"
+                  className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
+                >
+                  Your Library
+                </Link>
+              </nav>
+            )}
+
+            <div className="ml-auto flex items-center gap-2">
+              {session?.user ? (
+                <AccountMenu
+                  name={session.user.name}
+                  email={session.user.email}
+                  image={session.user.image}
+                />
+              ) : (
+                <SignedOutActions />
+              )}
+            </div>
           </div>
         </header>
 

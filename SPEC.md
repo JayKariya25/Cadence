@@ -1,7 +1,7 @@
 # Cadence — specification
 
 The source of truth for this project. Phases amend this file rather than
-re-deriving intent. Last updated at the end of **Phase 1** (2026-09-04).
+re-deriving intent. Last updated at the end of **Phase 2** (2026-09-11).
 
 ---
 
@@ -34,7 +34,7 @@ No hosting configs, no analytics, no paid services.
 | Backend tier | Route Handlers + Server Actions in the same repo |
 | Database | MongoDB 7 via Docker Compose, accessed with Mongoose 9 |
 | Styling | Tailwind CSS v4, shadcn/ui (`radix-nova`), Framer Motion |
-| Auth | NextAuth (Auth.js) + MongoDB adapter; credentials required, Google optional |
+| Auth | NextAuth (Auth.js) v5, **adapter-less**; credentials required, Google optional (see D18) |
 | Player state | Zustand — single source of truth for queue and playback |
 | Realtime | Socket.io in a **separate** Express process under `/realtime` |
 | Validation | Zod at every boundary: request bodies and external API responses |
@@ -60,7 +60,7 @@ SPEC.md
 
 ## 4. Data model
 
-Nine collections. All are created up front — including those first used in
+Nine collections plus two GridFS collections. All are created up front — including those first used in
 Phase 6 — because indexes are the thing nobody adds retroactively.
 
 ### Track
@@ -132,6 +132,11 @@ upserted into Track first, so Phase 3 can `$lookup` in one stage.
 `code` (6 chars, unique) · `hostId` · `memberIds[]` · `currentTrackId?` ·
 `positionMs` · `isPlaying` · `queue[]` · `lastSyncAt` · timestamps.
 
+### GridFS: playlistCovers.files / playlistCovers.chunks
+Uploaded playlist covers. Created by the driver, not by a Mongoose schema.
+Cadence depends on no third-party service beyond Jamendo, so covers live in the
+database and are served by a route handler that re-checks playlist visibility.
+
 ### CatalogueFetch
 `key` (unique) · `fetchedAt`. Records when a *list-shaped* Jamendo fetch last
 ran — `artist:<id>`, `album:<id>`. A Track's own `cachedAt` answers "is this
@@ -188,6 +193,18 @@ mismatch.
 `getAlbumPage` · `toTrackView`. Every function returns plain `TrackView`
 objects; Mongoose documents never cross the server/client boundary.
 
+### Server Actions — `app/actions/` (built, Phase 2)
+
+`likes.ts` (`setLikeAction`) · `playlists.ts` (create, rename, visibility,
+delete, add/remove track, reorder, cover upload) · `playlist-picker.ts` ·
+`session.ts`. Every mutation re-verifies ownership; the proxy's redirect is a
+convenience, never the authorisation boundary.
+
+### Library reads — `lib/library.ts`, `lib/playlists.ts` (built, Phase 2)
+
+`getLikedTrackIds` · `getLikedTracks` · `countLikes` · `getRecentlyPlayed` ·
+`getPlaylistsForUser` · `getPlaylist` · `assertCanEdit`.
+
 ### Player — `components/player/` (built, Phase 1)
 
 `player-store.ts` (Zustand, the single source of truth for queue and playback)
@@ -200,12 +217,13 @@ objects; Mongoose documents never cross the server/client boundary.
 | Route | Phase | Purpose |
 | --- | --- | --- |
 | `app/api/stream/[trackId]` | 1 | ✅ Audio proxy: source fallback, `Range` pass-through, `Accept-Ranges`, normalised `Content-Type` |
-| `app/api/auth/[...nextauth]` | 2 | Auth.js handler |
-| `app/api/playlists/[id]/cover` | 2 | GridFS cover image |
+| `app/api/auth/[...nextauth]` | 2 | ✅ Auth.js handler |
+| `app/api/plays` | 2 | ✅ Records a PlayEvent; also the `sendBeacon` target |
+| `app/api/playlists/[playlistId]/cover` | 2 | ✅ GridFS cover, visibility re-checked |
 | `app/api/search` | 3 | Tracks/artists/albums/playlists + the discovery rail |
 | `app/api/recommendations` | 4 | Scored feed with reason strings |
 | `app/api/stats` | 5 | Aggregation-pipeline analytics |
-| `proxy.ts` | 2 | Route protection — **Next 16 renamed `middleware.ts` to `proxy.ts`** |
+| `proxy.ts` | 2 | ✅ Route protection — **Next 16 renamed `middleware.ts` to `proxy.ts`**, and it now runs on the Node.js runtime |
 
 ---
 
@@ -239,9 +257,13 @@ objects; Mongoose documents never cross the server/client boundary.
       **Gate passed:** `getByteFrequencyData` returns peak 221/255 across
       635 of 1024 non-zero bins through the proxy, asserted by
       `e2e/audio-analyser.spec.ts`.
-- [ ] **Phase 2 — Auth and library.** NextAuth credentials + optional Google,
-      route protection via `proxy.ts`, likes with optimistic UI, playlist CRUD
-      with dnd-kit reorder, GridFS covers, recently played.
+- [x] **Phase 2 — Auth and library.** Auth.js v5 with credentials + optional
+      Google, route protection via `proxy.ts`, likes with optimistic UI backed
+      by a shared client store, playlist CRUD, drag-to-reorder with dnd-kit
+      (pointer *and* keyboard sensors), GridFS covers with visibility-checked
+      serving, public/private toggle, recently played from PlayEvent
+      aggregation. Play events are recorded from real listening time, flushed
+      on track change and via `sendBeacon` on `pagehide`.
 - [ ] **Phase 3 — Search-Scoped Discovery.** 300ms debounce, `AbortController`
       cancellation, min 2 chars, tabbed results, the related rail below
       non-empty results only, shared-tag explanations, `relevance >= 0.35`,
@@ -361,6 +383,39 @@ one — the graph detects this and rebuilds. (b) A dead source rejects its
 track; pausing on that rejection stopped the track that had just started. The
 handler now ignores rejections belonging to a track already left behind.
 
+**D18 — Auth.js runs without a database adapter.** `@auth/mongodb-adapter`
+peers on the v6 MongoDB driver; Mongoose 9 ships v7, and the two cannot
+resolve together. Downgrading Mongoose to 8 would have satisfied the adapter,
+but the adapter had little left to do: the Credentials provider forces the JWT
+session strategy, so there are no session rows to persist, leaving only user
+writes — which a `signIn` callback does through the same Mongoose schema as the
+rest of the app. The result is one driver, one connection pool, and no writes
+bypassing schema validation via the raw driver. The cost is roughly twenty
+lines of Google account upsert.
+
+**D19 — Next 16's Proxy runs on the Node.js runtime.** Auth.js normally requires
+splitting the config into an edge-safe half and a full half, because Edge
+middleware cannot load bcrypt or a database driver. Next 16 removed that
+constraint, so `proxy.ts` imports the real config directly. It still only
+checks *that* a session exists; every server action re-verifies ownership,
+because a redirect is not an authorisation boundary.
+
+**D20 — Play time is measured, not inferred.** The reporter accumulates
+position deltas while playing and discards negative or implausibly large ones,
+so seeking to the last thirty seconds of a track records thirty seconds rather
+than the whole duration. Phase 4's recommender weights by completion ratio, so
+an honest denominator matters. Flushed on track change by `fetch`, and on
+`pagehide` by `sendBeacon` — which is why the endpoint is a route handler and
+not a Server Action.
+
+**D21 — The JWT augmentation targets `@auth/core/jwt`.** `next-auth/jwt` is a
+bare `export * from "@auth/core/jwt"`, so declaration-merging against it never
+reaches the `JWT` interface and `token.uid` silently stays `unknown`.
+
+**D22 — Driver v7 moved GridFS `contentType` into `metadata`.** The deprecated
+top-level option was removed, so covers store their MIME type in the file
+document's metadata and the serving route reads it back from there.
+
 ---
 
 ## 9. Known limitations
@@ -376,8 +431,11 @@ handler now ignores rejections belonging to a track already left behind.
 - **`relevance` on `/tracks/similar` is not documented as guaranteed.** The
   schema treats it as optional; Phase 3 will fall back to a rank-derived score
   rather than dropping a usable recommendation.
-- **Play events are not recorded yet.** `PlayEvent` needs a signed-in user, so
-  writes begin in Phase 2. The `source` a play started from is already carried
-  through the player store.
+- **Anonymous listening is not recorded.** `/api/plays` answers 204 and stores
+  nothing when nobody is signed in, so the client never has to special-case a
+  signed-out beacon.
+- **Collaborators can edit contents but not settings.** Rename, delete,
+  visibility and cover are owner-only; add, remove and reorder are open to
+  collaborators. There is no UI for adding collaborators yet.
 - **The analyser test hook is development-only.** `window.__cadenceAnalyser` is
   set only when `NODE_ENV !== "production"`; the Playwright gate depends on it.

@@ -10,6 +10,8 @@ import {
   selectCurrentTrack,
   usePlayerStore,
 } from "@/components/player/player-store";
+import { LikeButton } from "@/components/library/like-button";
+import { AddToPlaylist } from "@/components/playlist/add-to-playlist";
 
 /** Numbered track rows for artist and album pages. */
 export function TrackList({
@@ -86,6 +88,13 @@ export function TrackList({
                   {track.albumName}
                 </Link>
               )}
+
+              <AddToPlaylist
+                trackId={track.id}
+                trackName={track.name}
+                className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+              />
+              <LikeButton trackId={track.id} size="sm" />
 
               <span className="numeric shrink-0 text-xs text-muted-foreground">
                 {formatDuration(track.duration)}

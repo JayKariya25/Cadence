@@ -4,9 +4,9 @@ A music streaming app where **recommendations appear on intent, not by
 default**. Built on the Jamendo Creative Commons catalogue, so the audio is
 full-length and legally streamable.
 
-> **Status: Phase 1 of 8 complete.** You can browse the catalogue and play
-> music end to end. Search-Scoped Discovery — the feature this project exists
-> for — is Phase 3. This README is expanded into the project's main surface
+> **Status: Phase 2 of 8 complete.** You can sign in, play music, save what you
+> like, and build playlists. Search-Scoped Discovery — the feature this project
+> exists for — is Phase 3. This README is expanded into the project's main surface
 > (demo GIFs, architecture diagram, algorithm explanation) in Phase 8. See
 > [SPEC.md](SPEC.md) for the full specification and phase checklist.
 
@@ -21,6 +21,14 @@ full-length and legally streamable.
   for volume, `M` to mute. Inert while you are typing.
 - **Artist and album pages**, with the artist's fuller catalogue pulled from
   Jamendo on first view and cached from then on.
+- **Accounts** — email and password out of the box, with Google sign-in as an
+  optional extra that hides itself cleanly when unconfigured.
+- **Likes** that flip instantly and roll back if the write fails, plus a Liked
+  Songs view.
+- **Playlists** with drag-to-reorder (mouse *or* keyboard), a public/private
+  toggle, and cover images stored in MongoDB GridFS — no external image host.
+- **Recently played**, built from real listening time rather than "the track
+  was loaded".
 
 ---
 
@@ -112,6 +120,21 @@ play would rewrite the whole user document, and the Phase 5 statistics need
 their own indexes. Those statistics are computed entirely in MongoDB
 aggregation pipelines — nothing is reduced in Node.
 
+**Listening time is measured, not inferred.** The reporter accumulates position
+deltas while audio is actually playing and throws away the negative ones (seek
+back) and the implausibly large ones (seek forward). Skip to the last thirty
+seconds of a track and Cadence records thirty seconds, not the full duration —
+which matters because the recommender weights plays by completion ratio. The
+event is flushed when the track changes, and via `navigator.sendBeacon` when
+the tab closes, since a `fetch` is cancelled on unload.
+
+**Auth.js runs without a database adapter.** `@auth/mongodb-adapter` peers on
+the v6 MongoDB driver while Mongoose 9 ships v7. Rather than downgrade, Cadence
+drops the adapter: the credentials provider forces JWT sessions anyway, so the
+adapter's only remaining job was persisting users — which a `signIn` callback
+does through the same Mongoose schemas as everything else. One driver, one
+connection pool, and no writes bypassing schema validation.
+
 **Every Jamendo response is cached in MongoDB and validated with Zod.** The
 free tier is quota-limited, so the cache is a database rather than an
 in-process LRU: it survives restarts, it is shared with the seed script, and
@@ -128,7 +151,7 @@ vector the entire recommendation engine is built on.
 | --- | --- | --- |
 | 0 | Foundation: Docker Mongo, models, Jamendo client, seed | ✅ |
 | 1 | Audio proxy, Zustand player, persistent player bar, catalogue pages | ✅ |
-| 2 | Auth, likes, playlists, GridFS covers, recently played | — |
+| 2 | Auth, likes, playlists, GridFS covers, recently played | ✅ |
 | 3 | **Search-Scoped Discovery** | — |
 | 4 | Explainable recommendation engine | — |
 | 5 | Listening stats from aggregation pipelines | — |
@@ -148,5 +171,8 @@ vector the entire recommendation engine is built on.
 - A small number of Jamendo tracks are listed by the API but missing from
   storage. The seed probes each one and hides the dead entries; the player also
   skips them at runtime, since availability can change after the check.
-- Listening history is not recorded yet — `PlayEvent` writes need a signed-in
-  user, which arrives in Phase 2.
+- Anonymous listening is not recorded. `/api/plays` accepts the request and
+  stores nothing when nobody is signed in.
+- Playlist collaborators can add, remove and reorder tracks, but renaming,
+  deleting, visibility and covers stay owner-only. There is no UI for inviting
+  a collaborator yet.

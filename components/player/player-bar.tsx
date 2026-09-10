@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { LikeButton } from "@/components/library/like-button";
 import { Artwork } from "./artwork";
 import { QueueDrawer } from "./queue-drawer";
 import {
@@ -158,6 +159,7 @@ export function PlayerBar() {
               {track.artistName}
             </Link>
           </div>
+          <LikeButton trackId={track.id} className="hidden sm:grid" />
         </div>
 
         {/* Transport */}
