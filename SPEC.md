@@ -1,7 +1,7 @@
 # Cadence — specification
 
 The source of truth for this project. Phases amend this file rather than
-re-deriving intent. Last updated at the end of **Phase 4** (2026-09-12).
+re-deriving intent. Last updated at the end of **Phase 5** (2026-09-12).
 
 ---
 
@@ -240,6 +240,24 @@ half only: candidate pools come from a `$setIntersection` / `$size` pipeline
 capped at 300, and everything that decides which one wins lives in
 `lib/scoring.ts`.
 
+### Listening statistics — `lib/aggregations/` (built, Phase 5)
+
+One module per pipeline: `range.ts` (the window, shared by page, selector and
+every query) · `match.ts` (the common `$match`) · `summary.ts` · `timeline.ts` ·
+`clock.ts` · `sources.ts` · `top.ts` · `tags.ts` · `index.ts` (`getStats`).
+
+Every number on `/stats` is produced by MongoDB. Nothing is reduced in Node
+from a list of fetched play events — not the totals, not the daily buckets, not
+the streak, not the zero-filled quiet days. Notable stages:
+
+| Pipeline | Technique |
+| --- | --- |
+| `summary` | `$documentNumber` + `$dateSubtract` to turn "find the runs of consecutive days" into an ordinary `$group` (D33); `$top` for the latest run |
+| `timeline` | `$densify` + `$fill` insert the silent days so the line cannot skip them |
+| `clock` | `$densify` over a numeric range so all 24 hours always exist |
+| `tags` | `$setWindowFields` for the range total, so shares are of *all* listening rather than of the eight shown |
+| `top` | `$limit` before `$lookup` — join ten tracks, not every track ever played |
+
 ### Server Actions — `app/actions/` (built, Phase 2)
 
 `likes.ts` (`setLikeAction`) · `playlists.ts` (create, rename, visibility,
@@ -270,7 +288,7 @@ convenience, never the authorisation boundary.
 | `app/api/search` | 3 | ✅ Tracks/artists/albums/playlists + the discovery rail |
 | `app/api/recommendations` | 4 | ✅ Scored feed with reason strings; the radio's source. Reachable only from search |
 | `app/welcome` | 4 | ✅ Cold-start taste picker |
-| `app/api/stats` | 5 | Aggregation-pipeline analytics |
+| `app/stats` | 5 | ✅ Listening statistics. A page, not an API route — see D32 |
 | `proxy.ts` | 2 | ✅ Route protection — **Next 16 renamed `middleware.ts` to `proxy.ts`**, and it now runs on the Node.js runtime |
 
 ---
@@ -331,8 +349,14 @@ convenience, never the authorisation boundary.
       **The output surface is still search and only search** (D26) — the
       thesis guard in `e2e/search-scoped-discovery.spec.ts` now also fails if
       any surface but search so much as *requests* `/api/recommendations`.
-- [ ] **Phase 5 — Listening stats.** `/stats` with range selector, everything
-      from aggregation pipelines in `lib/aggregations/`, Recharts, PNG export.
+- [x] **Phase 5 — Listening stats.** `/stats` with a URL-backed range selector
+      (7/30/90 days, all time), seven aggregation pipelines in
+      `lib/aggregations/`, four Recharts surfaces honouring
+      `prefers-reduced-motion`, top tracks and artists ranked by time heard,
+      a "where listening starts" breakdown by `PlaySource`, and a poster card
+      drawn to a canvas and exported as a real 1080×1350 PNG. Guarded by
+      `e2e/stats.spec.ts`, which seeds history through the live `/api/plays`
+      endpoint and asserts the PNG's magic bytes and dimensions.
 - [ ] **Phase 6 — Listen-together rooms.** Socket.io in `/realtime`, handshake
       auth, 6-char codes, drift-corrected sync (seek only above 750ms), shared
       queue, chat, host promotion.
@@ -551,6 +575,45 @@ no DOM, so `vitest.config.mts` declares a single Node project and Testing
 Library is not yet a dependency. Adding it now would have meant an unused
 package in `package.json` for four phases.
 
+**D32 — `/stats` is a page, not an API route.** The plan reserved
+`app/api/stats`. It was not built: the page is server-rendered, so it calls
+`getStats` directly and passes the result to the chart components as props. A
+route handler would exist only to be fetched by a client component, and there
+is none — adding one would mean a second network hop, a second authorisation
+check, and a second place for the shape of a statistic to be defined.
+
+**D33 — Streaks are computed in the pipeline, not in Node.** Number the
+distinct listening days in order with `$documentNumber`, then subtract each
+day's position from the day itself. Consecutive days advance in lockstep with
+their position and so collapse to the *same* anchor date, which turns "find the
+runs" into an ordinary `$group`; a gap shifts the anchor and starts a new run.
+A run only counts as *current* if it reaches today or yesterday.
+
+**D34 — Seven pipelines rather than one `$facet`.** A `$facet` sub-pipeline
+cannot use an index, so bundling them would have traded seven index seeks on
+`{ userId: 1, playedAt: -1 }` for a single collection scan feeding every
+branch. They run concurrently under `Promise.all`.
+
+**D35 — Day and hour buckets use the *server's* timezone.** Cadence runs
+locally by design, so the Node process's zone is the listener's zone. Asking
+the browser and threading an IANA name through every request would add a round
+trip to buy nothing here; a hosted deployment would have to do exactly that.
+
+**D36 — The poster is drawn on a canvas, not screenshotted from the DOM.**
+`html2canvas` re-implements CSS layout approximately, which is a strange thing
+to trust with the one artefact a person actually shares. Drawing directly gives
+the same 1080×1350 image on every machine and adds no dependency. Jamendo's
+image CDN sends `access-control-allow-origin: *`, so `crossOrigin="anonymous"`
+keeps the canvas untainted and `toBlob` works; a failed image falls back to a
+gradient rather than failing the download.
+
+**D37 — `$densify` is bounded by the data, not by the range.** `$dateTrunc`
+buckets days at local midnight, which is an awkward instant in UTC for most
+zones; stepping `$densify` from the raw range start would land between those
+buckets and invent days a few hours out. `bounds: "full"` steps from the first
+real bucket instead. The cost is that a range beginning in silence starts its
+axis at the first day with something to show.
+
 ---
 
 ## 9. Known limitations
@@ -586,5 +649,11 @@ package in `package.json` for four phases.
   hard, so a 30-track request typically yields 12-15. Honest for a catalogue
   this size; loosening the threshold would pad it with tracks that share one
   ubiquitous tag.
+- **Statistics bucket by the server's timezone** (D35). Correct for the local
+  deployment this project targets, wrong for a hosted one.
+- **A range that starts with silence starts its chart late** (D37). The axis
+  begins at the first day with listening rather than at the range's edge.
+- **`/stats` runs seven queries per view.** Concurrent and all index-backed, but
+  there is no caching layer: every range change re-queries.
 - **The analyser test hook is development-only.** `window.__cadenceAnalyser` is
   set only when `NODE_ENV !== "production"`; the Playwright gate depends on it.

@@ -4,11 +4,10 @@ A music streaming app where **recommendations appear on intent, not by
 default**. Built on the Jamendo Creative Commons catalogue, so the audio is
 full-length and legally streamable.
 
-> **Status: Phase 4 of 8 complete.** Search-Scoped Discovery is live, and the
-> rail beneath a search is now personal: it learns what you play, and every
-> card tells you why it is there. Sign in, play music, save what you like,
-> build playlists, and search to see the one place Cadence recommends
-> anything. This README is expanded into the project's main surface
+> **Status: Phase 5 of 8 complete.** Search-Scoped Discovery is live and the
+> rail beneath a search is personal — it learns what you play and every card
+> says why it is there. `/stats` now reports what you actually listened to,
+> computed entirely by MongoDB, with a poster you can export as a PNG. This README is expanded into the project's main surface
 > (demo GIFs, architecture diagram, algorithm explanation) in Phase 8. See
 > [SPEC.md](SPEC.md) for the full specification and phase checklist.
 
@@ -45,6 +44,12 @@ full-length and legally streamable.
   than being handed whatever is popular and told it is personal.
 - **Start radio** — continues a search rail into a full queue, still explained
   track by track.
+- **Listening statistics** at `/stats` — time heard per day, hour of the day,
+  top tracks and artists ranked by *time* rather than play count, what your
+  listening was made of, and where it started from. Every number is produced by
+  a MongoDB aggregation pipeline; nothing is added up in JavaScript.
+- **A poster you can share** — drawn onto a canvas and downloaded as a real
+  1080×1350 PNG, not a screenshot.
 
 ---
 
@@ -162,6 +167,40 @@ returns, but the fallback path — an IDF-weighted tag-overlap aggregation over
 the local catalogue — is what actually powers the feature today. The rail is
 labelled identically either way, because a listener should not have to care.
 
+## The stats page does its arithmetic in the database
+
+Play history is unbounded by design — it is its own collection precisely so it
+can grow — and a page that loads it all into memory to add it up is a page that
+gets slower every week somebody uses the app. So `/stats` computes nothing in
+JavaScript. Seven pipelines in [`lib/aggregations/`](lib/aggregations/) do the
+work, and three of the stages are worth reading:
+
+- **Streaks** (`summary.ts`). Number the distinct listening days in order, then
+  subtract each day's position from the day itself. Consecutive days advance in
+  lockstep with their position, so every day in a run collapses to the *same*
+  anchor date — which turns "find the runs" into an ordinary `$group`. A gap
+  shifts the anchor and starts a new run.
+- **Silent days** (`timeline.ts`). A day nobody listened is a real data point;
+  a line drawn straight across a quiet week shows listening that never
+  happened. `$densify` inserts the missing days and `$fill` gives them a zero,
+  so the gap-filling is part of the query rather than a loop on the client.
+  `clock.ts` does the same for the 24 hours of the day.
+- **Honest percentages** (`tags.ts`). `$setWindowFields` computes the total
+  across *every* tag before the top eight are sliced off, so the shares
+  describe your listening instead of summing to a flattering 100%.
+
+They are seven queries rather than one `$facet` for a specific reason: a
+`$facet` sub-pipeline cannot use an index, so bundling them would trade seven
+index seeks for one collection scan feeding every branch. They run
+concurrently.
+
+The poster is drawn onto a `<canvas>` rather than screenshotted from the DOM —
+`html2canvas` re-implements CSS layout approximately, which is a strange thing
+to trust with the one artefact a person actually shares. Drawing it directly
+produces the same image on every machine and adds no dependency.
+
+---
+
 ## Architecture notes
 
 **The realtime server is a separate process.** App Router route handlers are
@@ -226,7 +265,7 @@ vector the entire recommendation engine is built on.
 | 2 | Auth, likes, playlists, GridFS covers, recently played | ✅ |
 | 3 | **Search-Scoped Discovery** | ✅ |
 | 4 | **Explainable recommender** | ✅ |
-| 5 | Listening stats from aggregation pipelines | — |
+| 5 | **Listening stats from aggregation pipelines** | ✅ |
 | 6 | **Listen-together rooms** | — |
 | 7 | Lyrics and canvas visualizer | — |
 | 8 | Polish, tests, CI, and the README as a product surface | — |
@@ -254,6 +293,11 @@ vector the entire recommendation engine is built on.
 - A radio usually returns fewer tracks than it asks for. The relevance floor
   filters hard, which is honest for a catalogue of this size — loosening it
   would pad the queue with tracks sharing one ubiquitous tag.
+- Statistics bucket days and hours by the *server's* timezone. Correct for the
+  local deployment this project targets — the Node process's zone is yours —
+  and wrong for a hosted one, which would have to pass the client's zone.
+- A range that begins with silence starts its chart at your first day of
+  listening rather than at the range's edge.
 - There is no "Made for you" home row and no Weekly Mix. Both were in the
   original plan; both contradict the one opinion this project has, so the
   engine stayed and the surfaces did not. See decision D26 in [SPEC.md](SPEC.md).

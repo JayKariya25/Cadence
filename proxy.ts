@@ -13,7 +13,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
 /** Prefixes that require a signed-in user. */
-const PROTECTED = ["/library", "/liked", "/playlist/new", "/welcome"];
+const PROTECTED = ["/library", "/liked", "/playlist/new", "/welcome", "/stats"];
 
 export default auth((request) => {
   const { pathname } = request.nextUrl;

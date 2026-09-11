@@ -102,6 +102,12 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 >
                   Your Library
                 </Link>
+                <Link
+                  href="/stats"
+                  className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
+                >
+                  Listening
+                </Link>
               </nav>
             )}
 
