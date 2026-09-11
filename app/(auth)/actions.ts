@@ -92,7 +92,10 @@ export async function signUpAction(
   }
 
   // Outside the try: redirect() works by throwing, and must not be caught.
-  redirect("/");
+  // Into the taste picker rather than the home page: a brand new account has
+  // no history, and asking once is the difference between a rail ordered by
+  // this listener's taste and a rail ordered by nothing.
+  redirect("/welcome");
 }
 
 export async function signInAction(

@@ -4,15 +4,17 @@ A music streaming app where **recommendations appear on intent, not by
 default**. Built on the Jamendo Creative Commons catalogue, so the audio is
 full-length and legally streamable.
 
-> **Status: Phase 3 of 8 complete.** Search-Scoped Discovery — the feature this
-> project exists for — is live. Sign in, play music, save what you like, build
-> playlists, and search to see the one place Cadence recommends anything. This README is expanded into the project's main surface
+> **Status: Phase 4 of 8 complete.** Search-Scoped Discovery is live, and the
+> rail beneath a search is now personal: it learns what you play, and every
+> card tells you why it is there. Sign in, play music, save what you like,
+> build playlists, and search to see the one place Cadence recommends
+> anything. This README is expanded into the project's main surface
 > (demo GIFs, architecture diagram, algorithm explanation) in Phase 8. See
 > [SPEC.md](SPEC.md) for the full specification and phase checklist.
 
 ## What works today
 
-- **Playback** — 504 Creative Commons tracks across eight curated moods,
+- **Playback** — 1,067 Creative Commons tracks across sixteen curated moods,
   streamed through the app's own audio proxy. Queue, shuffle, repeat
   (off / all / one), volume, and a scrubber that really seeks.
 - **A player bar that never unmounts.** It lives in the root layout, so
@@ -32,8 +34,17 @@ full-length and legally streamable.
 - **Search-Scoped Discovery** — tabbed results for tracks, artists, albums and
   playlists, and beneath them a `Related to "…"` rail that exists on no other
   screen. Every card names the tags that earned it a place.
-- **1,067 tracks across sixteen mood rows**, half of them regional: Indian,
-  Latin, African, East Asian, Balkan, Reggae, Flamenco and Middle Eastern.
+- **Sixteen mood rows**, half of them regional: Indian, Latin, African, East
+  Asian, Balkan, Reggae, Flamenco and Middle Eastern.
+- **An explainable recommender.** The rail is ordered by what you actually
+  listen to, and says so on every card — `shares: acousticguitar, latin,
+  strings` alongside `matches your taste for world and acoustic`. Finishing a
+  track counts for it, abandoning one in the first fifth counts against it, and
+  the whole profile halves every thirty days.
+- **A cold-start picker.** A new account is asked what it listens to rather
+  than being handed whatever is popular and told it is personal.
+- **Start radio** — continues a search rail into a full queue, still explained
+  track by track.
 
 ---
 
@@ -91,6 +102,7 @@ Open <http://localhost:3000>.
 | `npm run typecheck` | `tsc --noEmit` across the app and `/realtime` |
 | `npm run lint` | ESLint |
 | `npm run build` | Production build |
+| `npm test` | Vitest unit tests — the recommender's scorer |
 | `npm run test:e2e` | Playwright suite, including the audio analyser gate |
 
 ---
@@ -106,10 +118,35 @@ to the home page "for consistency" and the project stops having a point. So it
 is enforced by a test: `e2e/search-scoped-discovery.spec.ts` fails if a related
 rail ever appears on the home page, an artist page, or an empty search.
 
+That guard now also fails if any surface but search so much as *requests*
+`/api/recommendations`.
+
 **How the rail is built.** The top-ranked track result becomes the seed. Its own
 artist is excluded, so the rail reads as discovery rather than more of the same
 record. Candidates are scored, filtered at a relevance of 0.35, deduplicated
 against the results already on screen, and capped at twelve.
+
+**How it learns.** A separate collection of play events — recorded from measured
+listening time, not from "the track was loaded" — is joined to the catalogue's
+tags and collapsed into one map of tag → weight per listener. Finishing a track
+counts for it in full; abandoning one inside the first fifth counts *against* it;
+a like is worth twice a play. Everything decays on a 30-day half-life, so the
+profile is a recent memory rather than a running total and can heal from being
+wrong about you. A track is then scored by cosine similarity between that
+profile and its tags — cosine, not a dot product, so someone with a year of
+history does not outscore someone with a week for the same taste — blended
+65/35 with how well it matches what you searched for.
+
+**What it does not do.** It does not only tell you what you already know: one
+slot in five is reserved for the best candidate that is *mostly* outside your
+usual, labelled as such. And it does not hide: there is no surface in this app
+where a recommendation appears without a reason next to it.
+
+**Why you can check it.** All of that arithmetic lives in `lib/scoring.ts`,
+which touches no database, no network and no React. `npm test` runs 51 unit
+tests against it with fixture taste profiles — that a skip really does count
+against a tag, that the repeat penalty demotes without excluding, that
+exploration reserves its slots and is deterministic rather than a coin toss.
 
 **Why the reason is visible.** Every card says what it shares — `shares:
 klezmer, balkan, world`. Those tags are ordered by inverse document frequency,
@@ -188,7 +225,7 @@ vector the entire recommendation engine is built on.
 | 1 | Audio proxy, Zustand player, persistent player bar, catalogue pages | ✅ |
 | 2 | Auth, likes, playlists, GridFS covers, recently played | ✅ |
 | 3 | **Search-Scoped Discovery** | ✅ |
-| 4 | Explainable recommendation engine | — |
+| 4 | **Explainable recommender** | ✅ |
 | 5 | Listening stats from aggregation pipelines | — |
 | 6 | **Listen-together rooms** | — |
 | 7 | Lyrics and canvas visualizer | — |
@@ -211,3 +248,12 @@ vector the entire recommendation engine is built on.
 - Playlist collaborators can add, remove and reorder tracks, but renaming,
   deleting, visibility and covers stay owner-only. There is no UI for inviting
   a collaborator yet.
+- The taste profile is rebuilt at most every six hours, so a play recorded now
+  may not move the rail immediately. That is far shorter than the 30-day
+  half-life, so nothing observable turns on it.
+- A radio usually returns fewer tracks than it asks for. The relevance floor
+  filters hard, which is honest for a catalogue of this size — loosening it
+  would pad the queue with tracks sharing one ubiquitous tag.
+- There is no "Made for you" home row and no Weekly Mix. Both were in the
+  original plan; both contradict the one opinion this project has, so the
+  engine stayed and the surfaces did not. See decision D26 in [SPEC.md](SPEC.md).

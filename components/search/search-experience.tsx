@@ -42,8 +42,11 @@ const EMPTY_RESULTS: SearchResults = {
 
 export function SearchExperience({
   recentSearches,
+  coldStart,
 }: {
   recentSearches: string[];
+  /** Signed in, but nothing known about them yet. */
+  coldStart: boolean;
 }) {
   const searchParams = useSearchParams();
   const initial = searchParams.get("q") ?? "";
@@ -132,6 +135,27 @@ export function SearchExperience({
           </button>
         )}
       </div>
+
+      {/*
+        The one prompt Cadence makes on its own — and it is an offer to be told
+        something, not a recommendation. It appears here, before any query,
+        because this is the screen where knowing the listener's taste will
+        change what they are shown.
+      */}
+      {!hasQuery && coldStart && (
+        <div className="mt-10 rounded-lg border border-hairline bg-surface-2 px-5 py-4">
+          <p className="text-sm">
+            Cadence knows nothing about your taste yet, so the rail below a
+            search will be ordered by the search alone.
+          </p>
+          <Link
+            href="/welcome"
+            className="mt-1.5 inline-block text-sm text-brand underline-offset-4 hover:underline"
+          >
+            Tell it what you listen to →
+          </Link>
+        </div>
+      )}
 
       {!hasQuery && (
         <section className="mt-10" aria-labelledby="recent-heading">
@@ -312,6 +336,7 @@ export function SearchExperience({
             query={results.query}
             related={results.related}
             source={results.relatedSource}
+            seedId={results.seed?.id}
           />
         </>
       )}

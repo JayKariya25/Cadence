@@ -1,7 +1,7 @@
 # Cadence — specification
 
 The source of truth for this project. Phases amend this file rather than
-re-deriving intent. Last updated at the end of **Phase 3** (2026-09-11).
+re-deriving intent. Last updated at the end of **Phase 4** (2026-09-12).
 
 ---
 
@@ -96,7 +96,14 @@ rather than displayName/avatarUrl. The MongoDB adapter writes this collection
 through the raw driver, bypassing Mongoose, so the two views must agree.
 
 `email` (unique) · `passwordHash?` (bcrypt, `select: false`) ·
-`tagAffinity: Map<string, number>` · `affinityUpdatedAt?` · timestamps.
+`tagAffinity: Map<string, number>` · `affinityUpdatedAt?` ·
+`tastePicks[]` · `tastePickedAt?` · timestamps.
+
+`tagAffinity` is a **cache**, derived from PlayEvent, Like and `tastePicks`,
+and safe to delete — it is rebuilt whenever it goes stale (6h TTL). The picks
+are stored separately because the cache is rebuilt from scratch on every
+recompute: written straight into `tagAffinity`, a new listener's answers would
+be erased by their first play (D28).
 
 ### Playlist
 `ownerId` · `title` · `description?` · `coverFileId?` (GridFS) · `isPublic` ·
@@ -193,11 +200,51 @@ mismatch.
 `getAlbumPage` · `toTrackView`. Every function returns plain `TrackView`
 objects; Mongoose documents never cross the server/client boundary.
 
+### Tag statistics — `lib/tag-stats.ts` (built, Phase 4)
+
+`getTagIdf` · `rankSharedTags` · `allTags`. Extracted from `lib/search.ts` so
+the search rail and the recommender agree about what a tag is worth; two
+modules computing this separately would eventually disagree, and the
+disagreement would surface as a rail whose ordering contradicted its own
+explanations.
+
+### The scorer — `lib/scoring.ts` (built, Phase 4)
+
+Pure arithmetic over plain maps. No database, no network, no React, and
+deliberately no `server-only` so the unit tests import it directly under Node
+and client components can import the reason types.
+
+`decayFactor` · `engagementWeight` · `accumulate` · `topTags` ·
+`cosineSimilarity` · `trackVector` · `overlapRelevance` · `scoreCandidate` ·
+`familiarTags` · `familiarityScore` · `isFamiliarTrack` · `explorationSlots` ·
+`applyExplorationQuota` · `describeTags` · `sharedTagsReason` · `tasteReason` ·
+`explorationReason`.
+
+Constants, all named and all tested: 30-day half-life · `SKIP_THRESHOLD 0.2` ·
+`SKIP_PENALTY -0.4` · `LIKE_WEIGHT 2` · `PICK_WEIGHT 1.5` ·
+`AFFINITY_TAG_LIMIT 60` · `TASTE_WEIGHT 0.65` / `SEED_WEIGHT 0.35` ·
+`REPEAT_PENALTY 0.35` · `EXPLORATION_QUOTA 0.2` · `FAMILIARITY_THRESHOLD 0.5`.
+
+### Taste profile — `lib/affinity.ts` (built, Phase 4)
+
+`computeAffinity` · `getAffinity` · `saveTastePicks` · `getTastePicks` ·
+`needsTastePicker`. Rebuilds rather than updating incrementally: an
+incremental update cannot apply decay without rescaling every existing weight
+on every write, and cannot undo a play that has since been re-evaluated. An
+in-process promise map collapses concurrent rebuilds.
+
+### Recommender — `lib/recommend.ts` (built, Phase 4)
+
+`rankRelated` · `relatedCandidatesFor` · `getRecommendations`. The database
+half only: candidate pools come from a `$setIntersection` / `$size` pipeline
+capped at 300, and everything that decides which one wins lives in
+`lib/scoring.ts`.
+
 ### Server Actions — `app/actions/` (built, Phase 2)
 
 `likes.ts` (`setLikeAction`) · `playlists.ts` (create, rename, visibility,
 delete, add/remove track, reorder, cover upload) · `playlist-picker.ts` ·
-`session.ts`. Every mutation re-verifies ownership; the proxy's redirect is a
+`session.ts` · `taste.ts` (`saveTastePicksAction`, Phase 4). Every mutation re-verifies ownership; the proxy's redirect is a
 convenience, never the authorisation boundary.
 
 ### Library reads — `lib/library.ts`, `lib/playlists.ts` (built, Phase 2)
@@ -221,7 +268,8 @@ convenience, never the authorisation boundary.
 | `app/api/plays` | 2 | ✅ Records a PlayEvent; also the `sendBeacon` target |
 | `app/api/playlists/[playlistId]/cover` | 2 | ✅ GridFS cover, visibility re-checked |
 | `app/api/search` | 3 | ✅ Tracks/artists/albums/playlists + the discovery rail |
-| `app/api/recommendations` | 4 | Scored feed with reason strings |
+| `app/api/recommendations` | 4 | ✅ Scored feed with reason strings; the radio's source. Reachable only from search |
+| `app/welcome` | 4 | ✅ Cold-start taste picker |
 | `app/api/stats` | 5 | Aggregation-pipeline analytics |
 | `proxy.ts` | 2 | ✅ Route protection — **Next 16 renamed `middleware.ts` to `proxy.ts`**, and it now runs on the Node.js runtime |
 
@@ -273,9 +321,16 @@ convenience, never the authorisation boundary.
       `e2e/search-scoped-discovery.spec.ts`, which fails if a rail ever appears
       outside search. **See D23: `/tracks/similar` returns nothing, so the
       documented fallback is the live mechanism.**
-- [ ] **Phase 4 — Recommendation engine.** tagAffinity from PlayEvent with
-      completion weighting and 30-day half-life decay, cosine scoring, 20%
-      exploration quota, reason strings, cold-start taste picker, unit tests.
+- [x] **Phase 4 — Explainable recommender.** `tagAffinity` built from
+      PlayEvent, Like and `tastePicks` with completion weighting, a skip
+      penalty and 30-day half-life decay; cosine scoring blended with seed
+      similarity; repeat penalty; deterministic 20% exploration quota; a
+      human-readable reason on every card; cold-start taste picker at
+      `/welcome`; "start radio" continuing a rail into a queue. 51 Vitest unit
+      tests over the scorer with fixture affinity maps.
+      **The output surface is still search and only search** (D26) — the
+      thesis guard in `e2e/search-scoped-discovery.spec.ts` now also fails if
+      any surface but search so much as *requests* `/api/recommendations`.
 - [ ] **Phase 5 — Listening stats.** `/stats` with range selector, everything
       from aggregation pipelines in `lib/aggregations/`, Recharts, PNG export.
 - [ ] **Phase 6 — Listen-together rooms.** Socket.io in `/realtime`, handshake
@@ -448,6 +503,54 @@ vocabulary is not guessable — "indian", "african", "balkan", "flamenco",
 "tabla" and "reggaeton" return nothing — so every tag was verified against the
 live API before being seeded.
 
+**D26 — The recommender has exactly one output surface: the search rail.**
+The original brief also named a "Made for you" home row, "Because you played X"
+rows and a Weekly Mix. Every one of those contradicts the product thesis, which
+says recommendations appear *only* once the listener has signalled intent by
+searching. Phase 4 therefore spends its budget making that one rail personal
+and explainable rather than adding surfaces that would dilute the only opinion
+this project has. The engine is surface-agnostic — `getRecommendations` already
+returns a seedless taste feed — so a Weekly Mix is a page and a query away if
+that call is ever reversed. It is a product decision, not a technical one.
+
+**D27 — The scorer is a pure module with no `server-only`.** A recommender
+whose scoring lives inside an aggregation pipeline can only be evaluated by
+running it against real data and squinting at the output. `lib/scoring.ts`
+takes plain maps and returns plain numbers, so 51 unit tests assert that a skip
+counts against a tag, that cosine ignores how *much* someone has listened, that
+the repeat penalty does not exclude, and that exploration reserves its slots.
+It is also why the reason types can be imported by client components.
+
+**D28 — Cold-start picks are stored as input, not written into the profile.**
+`tagAffinity` is rebuilt from scratch on every recompute, so picks written
+directly into it would be erased by the listener's first play — leaving someone
+who had just described their taste with a profile of one track. Stored in
+`tastePicks`, they are re-applied on every rebuild and decay on the same 30-day
+clock, so real listening overtakes them within a month or two rather than the
+picks being switched off on an arbitrary day.
+
+**D29 — Exploration is deterministic, and familiarity is a weighted share.**
+Randomised exploration is untestable and produces a different rail on every
+keystroke for the same query, which reads as a bug; the quota takes the *best*
+unfamiliar candidates instead. Familiarity was first written as "shares any of
+the listener's top tags", which measurement showed marked essentially every
+candidate familiar — the quota reserved zero slots on every live query. It is
+now the IDF-weighted *share* of a track that is familiar, against a 0.5
+threshold, which fires as intended (2 of 12 on the verification run).
+
+**D30 — Tag reasons and "your usual" are ranked by weight × IDF.** Jamendo's
+vocabulary is full of tags that sit on a third of the catalogue —
+"instrumental", "neutral", "travel". Ranked by affinity weight alone they crowd
+out the tags that distinguish one listener from another, which makes "your
+usual" mean "music" and makes the explanations read as noise. Rarity is a thumb
+on the scale, not a veto: an overwhelming weight still wins, and there is a test
+for each direction.
+
+**D31 — Vitest added in Phase 4, jsdom deferred to Phase 8.** The scorer needs
+no DOM, so `vitest.config.mts` declares a single Node project and Testing
+Library is not yet a dependency. Adding it now would have meant an unused
+package in `package.json` for four phases.
+
 ---
 
 ## 9. Known limitations
@@ -472,5 +575,16 @@ live API before being seeded.
 - **Collaborators can edit contents but not settings.** Rename, delete,
   visibility and cover are owner-only; add, remove and reorder are open to
   collaborators. There is no UI for adding collaborators yet.
+- **The taste profile is rebuilt at most every six hours.** A play recorded
+  now may not move the rail until the next rebuild. Far shorter than the 30-day
+  half-life, so nothing observable turns on it — but it does mean the profile is
+  not live.
+- **Exploration is bounded by the catalogue.** With ~1,067 tracks, a listener
+  whose taste spans several mood rows can exhaust the genuinely unfamiliar
+  candidates; the quota then backfills in rank order rather than padding.
+- **A radio is often shorter than it asks for.** `MIN_RELEVANCE 0.35` filters
+  hard, so a 30-track request typically yields 12-15. Honest for a catalogue
+  this size; loosening the threshold would pad it with tracks that share one
+  ubiquitous tag.
 - **The analyser test hook is development-only.** `window.__cadenceAnalyser` is
   set only when `NODE_ENV !== "production"`; the Playwright gate depends on it.

@@ -11,6 +11,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @cadence/realtime",
     "seed": "tsx --env-file-if-exists=.env.local scripts/seed.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -50,7 +52,8 @@
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.0"
   },
   "description": "A music streaming app where recommendations appear on intent, not by default.",
   "workspaces": [

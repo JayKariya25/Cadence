@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Heart, ListMusic, LogOut, User as UserIcon } from "lucide-react";
+import { Heart, ListMusic, LogOut, SlidersHorizontal, User as UserIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -70,6 +70,12 @@ export function AccountMenu({
           <Link href="/library">
             <ListMusic className="h-4 w-4" />
             Your Library
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/welcome">
+            <SlidersHorizontal className="h-4 w-4" />
+            Tune your taste
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />

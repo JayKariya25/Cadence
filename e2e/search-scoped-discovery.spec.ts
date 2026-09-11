@@ -11,6 +11,14 @@ import { expect, test } from "@playwright/test";
  */
 
 test("the related rail appears in search, and only in search", async ({ page }) => {
+  // The recommender has exactly one entry point. If any other surface ever
+  // starts asking for recommendations — even without rendering a rail — this
+  // is where it is caught.
+  const recommendationCalls: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/recommendations")) recommendationCalls.push(r.url());
+  });
+
   // Every surface that is NOT search must have no related rail.
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /^Related to/ })).toHaveCount(0);
@@ -23,6 +31,9 @@ test("the related rail appears in search, and only in search", async ({ page }) 
   // No query yet: recent searches, never recommendations.
   await expect(page.getByRole("heading", { name: /^Related to/ })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Recent searches" })).toBeVisible();
+
+  expect(recommendationCalls).toEqual([]);
+  console.log("  /api/recommendations calls outside a search:", recommendationCalls.length);
 });
 
 test("one character is not a search; two are", async ({ page }) => {

@@ -7,8 +7,9 @@ import { Schema, model, models, type Model, type Types } from "mongoose";
  * bypassing Mongoose entirely, so the two views of a user have to agree on
  * names or half the profile silently disappears on an OAuth sign-in.
  *
- * `passwordHash` is absent for OAuth-only accounts, and `tagAffinity` is empty
- * until the user has listening history — Phase 4 treats that as cold start.
+ * `passwordHash` is absent for OAuth-only accounts. `tagAffinity` is the
+ * learned taste profile of Phase 4: a derived cache, rebuilt from PlayEvent,
+ * Like and `tastePicks`, never the authority on anything.
  */
 export interface UserDocument {
   _id: Types.ObjectId;
@@ -18,9 +19,24 @@ export interface UserDocument {
   image?: string;
   /** bcrypt hash. Absent when the account was created through OAuth. */
   passwordHash?: string;
-  /** Learned taste profile: tag -> weight. Rebuilt from PlayEvent history. */
+  /**
+   * Learned taste profile: tag -> weight. Derived, and safe to delete — it is
+   * rebuilt from play history, likes and `tastePicks` whenever it goes stale.
+   */
   tagAffinity: Map<string, number>;
   affinityUpdatedAt?: Date;
+  /**
+   * What the listener chose in the cold-start picker.
+   *
+   * Kept as durable input rather than written straight into `tagAffinity`,
+   * because the affinity map is a cache: the first recompute after a single
+   * play would otherwise erase the picks entirely and leave a listener who had
+   * just told us their taste with a profile of one track. Stored here, the
+   * picks are re-applied on every rebuild and decay at the same rate as
+   * everything else, so real listening overtakes them within a month or two.
+   */
+  tastePicks: string[];
+  tastePickedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,6 +60,8 @@ const userSchema = new Schema<UserDocument>(
       default: (): Map<string, number> => new Map(),
     },
     affinityUpdatedAt: { type: Date },
+    tastePicks: { type: [String], default: [] },
+    tastePickedAt: { type: Date },
   },
   { timestamps: true },
 );
