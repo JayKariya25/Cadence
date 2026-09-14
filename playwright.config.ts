@@ -35,10 +35,25 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: "npm run dev:next",
-    url: "http://localhost:3000",
-    reuseExistingServer: true,
-    timeout: 180_000,
-  },
+  /*
+    Both processes, each with its own readiness URL. Starting them as two
+    entries rather than one `npm run dev` is what lets Playwright wait for the
+    realtime server specifically — the listen-together suite fails at the
+    handshake if it races ahead of it. `reuseExistingServer` means a developer
+    who already has `npm run dev` going does not get a second pair.
+  */
+  webServer: [
+    {
+      command: "npm run dev:next",
+      url: "http://localhost:3000",
+      reuseExistingServer: true,
+      timeout: 180_000,
+    },
+    {
+      command: "npm run dev:realtime",
+      url: "http://localhost:4000/health",
+      reuseExistingServer: true,
+      timeout: 60_000,
+    },
+  ],
 });

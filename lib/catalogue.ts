@@ -22,8 +22,17 @@ export type { TrackView };
 // server-only modules here, maps a Track document the same way this does.
 export { toTrackView };
 
-/** Newest-cached first is a stable, meaningful order for a curated row. */
-const MOOD_ROW_LIMIT = 20;
+/**
+ * Tracks per mood row.
+ *
+ * Twelve rather than twenty because the home page carries sixteen rows: at
+ * twenty, 320 `<img>` elements ship in the initial HTML, and the browser
+ * eagerly fetched 121 of them — 1.3MB that starved the font requests queued
+ * behind it and pushed Largest Contentful Paint to 6.5s on a throttled
+ * connection. A row scrolls horizontally and shows six or seven at a time, so
+ * twelve is still more than anybody sees before scrolling.
+ */
+const MOOD_ROW_LIMIT = 12;
 
 export interface MoodRow {
   mood: Mood;

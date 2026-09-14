@@ -1,7 +1,7 @@
 # Cadence — specification
 
 The source of truth for this project. Phases amend this file rather than
-re-deriving intent. Last updated at the end of **Phase 7** (2026-09-14).
+re-deriving intent. Last updated at the end of **Phase 8** (2026-09-14). All phases complete.
 
 ---
 
@@ -428,9 +428,17 @@ convenience, never the authorisation boundary.
       Guarded by `e2e/lyrics-visualizer.spec.ts`, which compares two canvas
       frames while audio plays — a canvas that *renders* is easy, a canvas fed
       by the analyser is the claim.
-- [ ] **Phase 8 — Polish, tests, repository presentation.** Skeletons, error
-      boundaries, empty states, rate limiting, Lighthouse ≥ 90, Vitest units,
-      two Playwright flows, GitHub Actions, and the README as a product surface.
+- [x] **Phase 8 — Polish, tests, repository presentation.** Loading skeletons
+      scoped so they cannot break status codes (D50), route and global error
+      boundaries, a custom 404, a token-bucket rate limiter on every write and
+      every expensive read (D51), `robots.ts`, GitHub Actions running
+      typecheck / lint / units / build on every push with an opt-in end-to-end
+      job, and `docs/` with the architecture diagrams.
+      **Lighthouse:** desktop **100 / 100 / 100 / 100**; mobile **95-90**
+      performance with 100 accessibility, 100 best practices, 100 SEO (D54).
+      Getting there meant code-splitting the now-playing view (D52) and
+      holding offscreen catalogue rows out of the DOM entirely (D53).
+      **103 unit tests, 17 end-to-end tests.**
 
 ---
 
@@ -759,6 +767,53 @@ still surface in the terminal and in the error overlay, which is separate.
 `loadedmetadata`.** Recorded in Phase 6 as D43; Phase 7 depends on it too,
 because clicking a lyric line seeks.
 
+**D50 — A `loading.tsx` turns `notFound()` into an HTTP 200.** A loading file
+wraps its segment *and every segment below it* in a Suspense boundary, which
+makes those routes stream — and a streamed response has already sent its status
+line by the time the page body runs. At `app/` this quietly turned every
+`notFound()` in the application into a 200 carrying 404 content. The home
+page's skeleton now lives in an `app/(home)/` route group so it covers exactly
+one route, which cannot 404, and no segment that can `notFound()` has one.
+`e2e/resilience.spec.ts` asserts the status codes, not just the words.
+
+**D51 — Rate limiting is a token bucket, in-process.** A fixed window lets
+somebody spend a whole allowance in the last second of one window and the whole
+of the next in the first second — a burst of double the limit at the boundary.
+A bucket refills continuously, so the limit means what it says. Keyed by user
+id when there is a session, falling back to the forwarded address; running
+locally that fallback is one shared loopback address for everybody, which is a
+real weakness of IP keying and not one worth pretending away. In-process means
+per-instance; more than one instance would want the bucket in Redis, and the
+shape would not change. `/api/stream` is deliberately **not** limited — audio
+is a long-lived ranged request and throttling it would break playback.
+
+**D52 — The now-playing view is code-split.** It pulls in Framer Motion, the
+visualizer and the lyrics panel, and mounted eagerly in the root layout all of
+that shipped on every page for a panel that starts closed. Measured, the home
+page carried 262KB of script; after splitting, 213KB. `AudioEngine` stays in
+the layout — the view only *reads* the analyser, it does not own it.
+
+**D53 — Offscreen catalogue rows are held out of the DOM.** `loading="lazy"` is
+not enough with sixteen rows: Chrome's lazy threshold is generous on a slow
+connection, and it fetched 121 artwork images for a page you can see two rows
+of. An element that is not in the DOM cannot be fetched at all, so a row
+renders nothing until it is within about a viewport of being reached. Images
+dropped from 121 to 55 and Largest Contentful Paint from 9.7s to 3.7s on the
+mobile profile.
+
+**D54 — Lighthouse is reported on both presets, and observed timings alongside
+the simulated ones.** Default Lighthouse models a mobile device on slow 4G with
+a 4× CPU handicap. This app runs locally on a desktop, so both numbers are
+recorded rather than the flattering one. Worth knowing when reading them:
+*observed* First and Largest Contentful Paint are both **89ms** — the page is
+genuinely fast, and the three-second figure is Lantern's model of the critical
+byte chain on a throttled link.
+
+**D55 — `next/dynamic` must import the module's default export.** Resolving a
+*named* export inside the import's `.then()` left the component out of the
+React client manifest under Turbopack, and every route that rendered the layout
+without opening the panel — the 404 page among them — answered 500.
+
 ---
 
 ## 9. Known limitations
@@ -819,5 +874,15 @@ because clicking a lyric line seeks.
 - **The visualizer needs playback to have started once.** The Web Audio graph is
   built on the first play, so opening the view before then shows the still
   figure rather than a live one.
+- **Rate limits are per-process and mostly per-IP when signed out.** Running
+  locally, every anonymous request shares one loopback address, so the
+  anonymous bucket is effectively global. The signed-in path is the one that
+  works as intended.
+- **Mobile Lighthouse performance sits at 90-95, not 100.** The remaining cost
+  is the critical byte chain of a React application on a simulated slow link;
+  desktop is 100 and observed paint is 89ms (D54).
+- **CI runs the end-to-end suite only when a Jamendo key is configured.** A
+  fork without the secret gets typecheck, lint, unit tests and build, and the
+  e2e job skips cleanly rather than failing for something it cannot run.
 - **The analyser test hook is development-only.** `window.__cadenceAnalyser` is
   set only when `NODE_ENV !== "production"`; the Playwright gate depends on it.

@@ -133,6 +133,16 @@
     background: var(--brand);
     color: var(--primary-foreground);
   }
+  /*
+    `type="search"` gets a clear button from the browser, and Cadence draws its
+    own — styled, labelled, and in the right place. Two of them side by side is
+    the sort of detail that reads as nobody having looked.
+  */
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
+  }
 }
 
 @utility display {

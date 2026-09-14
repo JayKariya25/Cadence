@@ -4,7 +4,7 @@ import { Archivo, Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { AudioEngine } from "@/components/player/audio-engine";
 import { PlayerBar } from "@/components/player/player-bar";
-import { NowPlaying } from "@/components/player/now-playing";
+import { NowPlayingMount } from "@/components/player/now-playing-mount";
 import { KeyboardShortcuts } from "@/components/player/keyboard-shortcuts";
 import { PlaybackReporter } from "@/components/player/playback-reporter";
 import { AccountMenu, SignedOutActions } from "@/components/auth/account-menu";
@@ -137,8 +137,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         {/*
           Mounted here, not inside a page: the visualizer reads the analyser
           the <audio> element is wired to, and a remount would silence it.
+          The chunk itself loads on first open — see NowPlayingMount.
         */}
-        <NowPlaying signedIn={Boolean(userId)} />
+        <NowPlayingMount signedIn={Boolean(userId)} />
         <PlayerBar />
         <Toaster />
       </body>

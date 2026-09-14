@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch makes the first run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, lint, unit tests, build
+    runs-on: ubuntu-latest
+    env:
+      # The build imports every route module, and lib/env.ts validates the
+      # environment at module load. Nothing here connects to anything: every
+      # route is dynamic, so no page is rendered at build time.
+      MONGODB_URI: mongodb://localhost:27017/cadence-ci
+      AUTH_SECRET: ci-build-secret-not-used-to-sign-anything
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches .nvmrc, so CI and a developer's machine agree.
+          node-version: 24
+          cache: npm
+
+      # `npm ci` rather than `npm install`: it installs exactly the lockfile
+      # and fails if package.json and the lockfile disagree, which is the whole
+      # point of running it in CI.
+      - run: npm ci
+
+      - name: Typecheck (app and realtime)
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    needs: check
+    # The suite needs a seeded catalogue, which needs a Jamendo key. A fork
+    # without that secret should not see a red tick for something it cannot
+    # run, so the job checks for the key and skips cleanly instead.
+    env:
+      MONGODB_URI: mongodb://localhost:27017/cadence-ci
+      AUTH_SECRET: ci-e2e-secret-not-used-outside-this-job
+      AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_SOCKET_URL: http://localhost:4000
+      JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
+
+    services:
+      mongo:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip without a Jamendo key
+        id: guard
+        run: |
+          if [ -z "$JAMENDO_CLIENT_ID" ]; then
+            echo "No JAMENDO_CLIENT_ID secret; skipping the end-to-end suite."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.run == 'true'
+        with:
+          # Matches .nvmrc, so CI and a developer's machine agree.
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+        if: steps.guard.outputs.run == 'true'
+
+      - name: Install Chromium
+        if: steps.guard.outputs.run == 'true'
+        run: npx playwright install --with-deps chromium
+
+      # A smaller catalogue than a developer would seed locally: the suite
+      # needs enough tracks for search and the mood rows to be non-empty, not
+      # a thousand.
+      - name: Seed the catalogue
+        if: steps.guard.outputs.run == 'true'
+        run: npm run seed -- --limit=160
+
+      # playwright.config.ts starts both the Next.js and realtime servers and
+      # waits for each one's readiness URL, so there is nothing to orchestrate
+      # here — the same command a developer runs locally.
+      - name: End-to-end tests
+        if: steps.guard.outputs.run == 'true'
+        run: npx playwright test
+
+      - name: Upload the report on failure
+        if: failure() && steps.guard.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

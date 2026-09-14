@@ -18,6 +18,7 @@
 import { revalidatePath } from "next/cache";
 import { currentUserId } from "@/lib/auth";
 import { MAX_LRC_BYTES, clearLrc, saveLrc } from "@/lib/lyrics";
+import { LIMITS, rateLimit } from "@/lib/rate-limit";
 
 export interface LyricsFormState {
   error?: string;
@@ -30,6 +31,17 @@ export async function lyricsAction(
 ): Promise<LyricsFormState> {
   const userId = await currentUserId();
   if (!userId) return { error: "Sign in to edit lyrics." };
+
+  // Keyed by user rather than by address: a Server Action has no NextRequest
+  // to read a forwarded address from, and this path always has a session.
+  const limited = rateLimit(`lyricsUpload:user:${userId}`, LIMITS.lyricsUpload);
+  if (!limited.allowed) {
+    return {
+      error: `Too many changes at once. Try again in ${Math.ceil(
+        limited.retryAfterMs / 1000,
+      )}s.`,
+    };
+  }
 
   const trackId = String(formData.get("trackId") ?? "");
 

@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { NextRequest } from "next/server";
 import { currentUserId } from "@/lib/auth";
 import { recordSearch, searchCatalogue } from "@/lib/search";
+import { enforceLimit } from "@/lib/rate-limit.server";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,11 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   const viewerId = await currentUserId();
+
+  // After the session read so a signed-in person is charged to their own
+  // account rather than to whatever address they share with everybody else.
+  const limited = enforceLimit(request, "search", viewerId);
+  if (limited) return limited;
 
   try {
     const results = await searchCatalogue(parsed.data, viewerId);

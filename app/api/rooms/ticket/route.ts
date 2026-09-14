@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { NextRequest } from "next/server";
 import { currentUserId } from "@/lib/auth";
 import { issueRoomTicket } from "@/lib/rooms";
+import { enforceLimit } from "@/lib/rate-limit.server";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (!userId) {
     return Response.json({ error: "Sign in to join a room." }, { status: 401 });
   }
+
+  const limited = enforceLimit(request, "roomTicket", userId);
+  if (limited) return limited;
 
   let payload: unknown;
   try {

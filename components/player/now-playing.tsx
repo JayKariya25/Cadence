@@ -214,3 +214,12 @@ function ModeButton({
     </button>
   );
 }
+
+/*
+  A default export as well as the named one, because this module is reached
+  through `next/dynamic`. Resolving a *named* export inside the import's
+  `.then()` left the component out of the React client manifest under
+  Turbopack, and every route that rendered the layout without opening the
+  panel — the 404 page among them — answered 500.
+*/
+export default NowPlaying;

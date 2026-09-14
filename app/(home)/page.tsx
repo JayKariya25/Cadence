@@ -42,8 +42,17 @@ export default async function HomePage() {
       </div>
 
       <div className="mt-8 flex flex-col gap-12">
-        {rows.map((row) => (
-          <MoodRow key={row.mood.slug} mood={row.mood} tracks={row.tracks} />
+        {rows.map((row, index) => (
+          <MoodRow
+            key={row.mood.slug}
+            mood={row.mood}
+            tracks={row.tracks}
+            // One row. On a phone the hero copy fills the fold and the first
+            // row is barely in it; every image rendered eagerly here competes
+            // with the font requests that the largest text element is waiting
+            // on, which is what Largest Contentful Paint was measuring.
+            eager={index < 1}
+          />
         ))}
       </div>
     </div>

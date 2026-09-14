@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { NextRequest } from "next/server";
 import { currentUserId } from "@/lib/auth";
 import { getRecommendations } from "@/lib/recommend";
+import { enforceLimit } from "@/lib/rate-limit.server";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,9 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   const userId = await currentUserId();
+
+  const limited = enforceLimit(request, "recommendations", userId);
+  if (limited) return limited;
 
   try {
     const feed = await getRecommendations({

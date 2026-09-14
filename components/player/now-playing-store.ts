@@ -12,6 +12,14 @@ import { create } from "zustand";
 
 interface NowPlayingState {
   open: boolean;
+  /**
+   * Whether it has ever been opened this session.
+   *
+   * The view is a lazily-loaded chunk, so it must not be rendered before
+   * somebody asks for it — but once it has been, it stays mounted so closing
+   * it can animate out rather than vanishing.
+   */
+  everOpened: boolean;
   show(): void;
   hide(): void;
   toggle(): void;
@@ -19,7 +27,9 @@ interface NowPlayingState {
 
 export const useNowPlaying = create<NowPlayingState>()((set) => ({
   open: false,
-  show: () => set({ open: true }),
+  everOpened: false,
+  show: () => set({ open: true, everOpened: true }),
   hide: () => set({ open: false }),
-  toggle: () => set((state) => ({ open: !state.open })),
+  toggle: () =>
+    set((state) => ({ open: !state.open, everOpened: true })),
 }));

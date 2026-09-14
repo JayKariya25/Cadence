@@ -12,6 +12,7 @@ import { connectToDatabase } from "@/lib/db";
 import { toObjectId } from "@/lib/library";
 import { PlayEvent, Track } from "@/models";
 import { PLAY_SOURCES } from "@/lib/play-source";
+import { enforceLimit } from "@/lib/rate-limit.server";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Anonymous listening is allowed; it is simply not recorded. 204 rather than
   // 401 so the client never has to special-case a signed-out beacon.
   if (!userId) return new Response(null, { status: 204 });
+
+  const limited = enforceLimit(request, "plays", userId);
+  if (limited) return limited;
 
   let payload: unknown;
   try {

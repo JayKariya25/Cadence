@@ -5,15 +5,20 @@
  * the player keeps going — it is a client-side data need, not a page render.
  */
 import type { NextRequest } from "next/server";
+import { currentUserId } from "@/lib/auth";
 import { getLyrics } from "@/lib/lyrics";
+import { enforceLimit } from "@/lib/rate-limit.server";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   context: RouteContext<"/api/lyrics/[trackId]">,
 ): Promise<Response> {
   const { trackId } = await context.params;
+
+  const limited = enforceLimit(request, "lyrics", await currentUserId());
+  if (limited) return limited;
 
   try {
     const lyrics = await getLyrics(trackId);

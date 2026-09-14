@@ -4,12 +4,48 @@ A music streaming app where **recommendations appear on intent, not by
 default**. Built on the Jamendo Creative Commons catalogue, so the audio is
 full-length and legally streamable.
 
-> **Status: Phase 7 of 8 complete.** All three headline features are in, plus
-> the now-playing view: a canvas visualizer tinted by the artwork, and lyrics
-> that follow the track line by line. Phase 8 is polish, CI and turning this
-> README into the project's front door. This README is expanded into the project's main surface
-> (demo GIFs, architecture diagram, algorithm explanation) in Phase 8. See
-> [SPEC.md](SPEC.md) for the full specification and phase checklist.
+![The Cadence home page](docs/images/home.png)
+
+Cadence is not a Spotify clone with the serial numbers filed off. It is the
+familiar streaming shell, built properly, plus three things Spotify does not
+do — and one opinion it refuses to compromise on.
+
+```
+git clone … && cd cadence
+cp .env.example .env.local        # add a free Jamendo client id
+docker compose up -d              # MongoDB on 27018
+npm install && npm run seed       # ~1,000 Creative Commons tracks
+npm run dev                       # Next.js :3000 + realtime :4000
+```
+
+**Every phase is complete.** 103 unit tests, 17 end-to-end tests, Lighthouse
+100/100/100/100 on desktop. [`SPEC.md`](SPEC.md) is the specification and the
+numbered decision log; [`docs/architecture.md`](docs/architecture.md) has the
+diagrams.
+
+---
+
+## The one opinion this project has
+
+Spotify recommends at you on every surface. Cadence recommends in exactly one
+place: below a set of non-empty search results, because typing a query is the
+moment you actually said what you wanted.
+
+![Search results with the discovery rail beneath them](docs/images/search.png)
+
+That is easy to state and easy to erode — one "you might also like" rail added
+to the home page "for consistency" and the project stops having a point. So it
+is enforced by a test:
+[`e2e/search-scoped-discovery.spec.ts`](e2e/search-scoped-discovery.spec.ts)
+fails if a related rail ever appears on the home page, an artist page, or an
+empty search, **or if any surface but search so much as requests
+`/api/recommendations`**.
+
+There is no "Made for you" home row and no Weekly Mix. Both were in the
+original plan. Both contradict the opinion, so the engine was built and the
+surfaces were not — see decision **D26**.
+
+---
 
 ## What works today
 
@@ -78,7 +114,8 @@ built solidly and given no more time than it deserves.
 
 ## Setup
 
-**Requirements:** Node 20.9+ (24 LTS recommended, see `.nvmrc`) and Docker.
+**Requirements:** Node 20.9+ (24 — see `.nvmrc`, which is the version CI uses)
+and Docker.
 
 ```bash
 git clone <this repo> && cd cadence
@@ -93,7 +130,7 @@ copy its **Client ID**. Every other variable already has a working default.
 
 ```bash
 docker compose up -d        # MongoDB on host port 27018
-npm run seed                # ~504 tracks across 8 curated moods
+npm run seed                # ~1,000 tracks across 16 moods, half of them regional
 npm run dev                 # Next.js on :3000, realtime server on :4000
 ```
 
@@ -116,67 +153,14 @@ Open <http://localhost:3000>.
 | `npm run typecheck` | `tsc --noEmit` across the app and `/realtime` |
 | `npm run lint` | ESLint |
 | `npm run build` | Production build |
-| `npm test` | Vitest unit tests — the recommender's scorer |
-| `npm run test:e2e` | Playwright suite, including the audio analyser gate |
+| `npm test` | 103 Vitest unit tests over every pure module |
+| `npm run test:e2e` | 17 Playwright tests; it starts both servers itself |
 
 ---
 
-## The one opinion this project has
-
-Spotify recommends at you on every surface. Cadence recommends in exactly one
-place: below a set of non-empty search results, because typing a query is the
-moment you actually said what you wanted.
-
-That is easy to state and easy to erode — one "you might also like" rail added
-to the home page "for consistency" and the project stops having a point. So it
-is enforced by a test: `e2e/search-scoped-discovery.spec.ts` fails if a related
-rail ever appears on the home page, an artist page, or an empty search.
-
-That guard now also fails if any surface but search so much as *requests*
-`/api/recommendations`.
-
-**How the rail is built.** The top-ranked track result becomes the seed. Its own
-artist is excluded, so the rail reads as discovery rather than more of the same
-record. Candidates are scored, filtered at a relevance of 0.35, deduplicated
-against the results already on screen, and capped at twelve.
-
-**How it learns.** A separate collection of play events — recorded from measured
-listening time, not from "the track was loaded" — is joined to the catalogue's
-tags and collapsed into one map of tag → weight per listener. Finishing a track
-counts for it in full; abandoning one inside the first fifth counts *against* it;
-a like is worth twice a play. Everything decays on a 30-day half-life, so the
-profile is a recent memory rather than a running total and can heal from being
-wrong about you. A track is then scored by cosine similarity between that
-profile and its tags — cosine, not a dot product, so someone with a year of
-history does not outscore someone with a week for the same taste — blended
-65/35 with how well it matches what you searched for.
-
-**What it does not do.** It does not only tell you what you already know: one
-slot in five is reserved for the best candidate that is *mostly* outside your
-usual, labelled as such. And it does not hide: there is no surface in this app
-where a recommendation appears without a reason next to it.
-
-**Why you can check it.** All of that arithmetic lives in `lib/scoring.ts`,
-which touches no database, no network and no React. `npm test` runs 51 unit
-tests against it with fixture taste profiles — that a skip really does count
-against a tag, that the repeat penalty demotes without excluding, that
-exploration reserves its slots and is deterministic rather than a coin toss.
-
-**Why the reason is visible.** Every card says what it shares — `shares:
-klezmer, balkan, world`. Those tags are ordered by inverse document frequency,
-because two tracks sharing "instrumental" tells you almost nothing while two
-sharing "klezmer" tells you a great deal. The same weighting drives the score
-itself, so the rail ranks on informativeness rather than on raw tag overlap.
-
-**An honest note about the data source.** The specification called for Jamendo's
-`/tracks/similar` endpoint. It returns `status: "success"` with zero results
-for every seed tested, including Jamendo's most popular tracks — the free tier
-has no similarity data. Cadence still calls it first and still caches what it
-returns, but the fallback path — an IDF-weighted tag-overlap aggregation over
-the local catalogue — is what actually powers the feature today. The rail is
-labelled identically either way, because a listener should not have to care.
-
 ## The stats page does its arithmetic in the database
+
+![The listening statistics page](docs/images/stats.png)
 
 Play history is unbounded by design — it is its own collection precisely so it
 can grow — and a page that loads it all into memory to add it up is a page that
@@ -211,6 +195,8 @@ produces the same image on every machine and adds no dependency.
 ---
 
 ## Two browsers, one second
+
+![A listening room with two people in it](docs/images/room.png)
 
 A room keeps everybody on the same moment of the same track. The interesting
 part is not the WebSocket; it is deciding whose clock is right.
@@ -257,6 +243,8 @@ a single page.
 
 ## The visualizer is the payoff of a Phase 1 decision
 
+![The visualizer and timed lyrics](docs/images/now-playing.png)
+
 Phase 1 proxied all audio through `app/api/stream` so the Web Audio
 `AnalyserNode` could read it without a cross-origin taint, and has been
 asserting `getByteFrequencyData` returns non-zero data ever since. This is what
@@ -300,6 +288,9 @@ of lines long.
 ---
 
 ## Architecture notes
+
+The diagrams — system topology, the room sync sequence, and the data model —
+are in [`docs/architecture.md`](docs/architecture.md).
 
 **The realtime server is a separate process.** App Router route handlers are
 request-scoped: they cannot hold a WebSocket open or keep room state in memory
@@ -354,19 +345,75 @@ vector the entire recommendation engine is built on.
 
 ---
 
-## Roadmap
+## What shipped, phase by phase
 
-| Phase | Ships | Status |
+| Phase | Ships | |
 | --- | --- | --- |
-| 0 | Foundation: Docker Mongo, models, Jamendo client, seed | ✅ |
-| 1 | Audio proxy, Zustand player, persistent player bar, catalogue pages | ✅ |
-| 2 | Auth, likes, playlists, GridFS covers, recently played | ✅ |
+| 0 | Foundation: Docker Mongo, 11 models with indexes, Jamendo client with Zod + retry + cache, seed script | ✅ |
+| 1 | Audio proxy with `Range` support, Zustand player, persistent player bar, catalogue pages | ✅ |
+| 2 | Auth, likes, playlists, GridFS covers, play history from measured listening time | ✅ |
 | 3 | **Search-Scoped Discovery** | ✅ |
-| 4 | **Explainable recommender** | ✅ |
-| 5 | **Listening stats from aggregation pipelines** | ✅ |
+| 4 | **An explainable recommender** | ✅ |
+| 5 | Listening stats from aggregation pipelines, canvas poster export | ✅ |
 | 6 | **Listen-together rooms** | ✅ |
-| 7 | **Lyrics and canvas visualizer** | ✅ |
-| 8 | Polish, tests, CI, and the README as a product surface | — |
+| 7 | Canvas visualizer and timed lyrics | ✅ |
+| 8 | Polish, rate limiting, error boundaries, CI, Lighthouse, docs | ✅ |
+
+---
+
+## Testing
+
+| Command | What it covers |
+| --- | --- |
+| `npm test` | **103 unit tests.** The recommender's scorer, the room sync maths, handshake tickets, `.lrc` parsing, the rate limiter — every pure module |
+| `npm run test:e2e` | **17 end-to-end tests.** Playwright starts both servers itself |
+| `npm run typecheck` | `tsc --noEmit` across the app *and* `/realtime` |
+
+The end-to-end suite asserts things that are hard to fake:
+
+- **The analyser really reads audio.** `getByteFrequencyData` returns non-zero
+  data through the proxy — the Phase 1 gate that everything visual depends on.
+- **Two browsers really are in sync.** Two isolated contexts join one room and
+  `currentTime` is read off both `<audio>` elements: **0.21s apart**. A sync
+  feature cannot be tested from a single page.
+- **The visualizer really is live.** Two canvas frames captured while audio
+  plays must *differ* — a canvas that renders is easy and proves nothing.
+- **The poster really is a PNG.** Magic bytes and dimensions, not just that a
+  file arrived.
+- **A 404 really is a 404.** Status codes, because a `loading.tsx` once turned
+  every `notFound()` into a 200 with nothing on screen to say so.
+
+CI runs typecheck, lint, unit tests and a production build on every push. The
+end-to-end job needs a seeded catalogue, so it runs only where a
+`JAMENDO_CLIENT_ID` secret exists and skips cleanly in a fork that has none.
+
+---
+
+## Performance
+
+Measured against a production build with Lighthouse 12.
+
+| | Performance | Accessibility | Best practices | SEO |
+| --- | --- | --- | --- | --- |
+| **Desktop** | **100** | **100** | **100** | **100** |
+| **Mobile** (slow 4G, 4× CPU) | **90-95** | **100** | **100** | **100** |
+
+Two findings from getting there, both in the decision log:
+
+- The now-playing view was shipping Framer Motion, the visualizer and the
+  lyrics panel on **every** page for a panel that starts closed. Code-split, it
+  loads on first open (**D52**).
+- `loading="lazy"` is not enough with sixteen catalogue rows: Chrome fetched
+  **121** artwork images for a page you can see two rows of. Rows are now held
+  out of the DOM until they are approached — an element that is not in the DOM
+  cannot be fetched. Images dropped to 55 and mobile LCP from 9.7s to 3.7s
+  (**D53**).
+
+Worth knowing when reading those numbers: *observed* First and Largest
+Contentful Paint are both **89ms**. The mobile figure is Lighthouse's model of
+a throttled link, not a stopwatch (**D54**).
+
+---
 
 ## Known limitations
 

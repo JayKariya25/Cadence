@@ -42,9 +42,12 @@ test("the analyser reads non-zero frequency data through the stream proxy", asyn
     let peak = 0;
     let nonZeroBins = 0;
 
-    // Sample repeatedly: a single read can legitimately land on a quiet frame
-    // at the very start of a track.
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    // Sample a window and keep the best frame, rather than stopping at the
+    // first one that is not silent. The onset of a note legitimately lights up
+    // only a handful of bins, so bailing on `peak > 0` made this assert
+    // against whatever frame happened to arrive first — which is how a passing
+    // test becomes a flaky one.
+    for (let attempt = 0; attempt < 30; attempt += 1) {
       analyser.getByteFrequencyData(bins);
       let localPeak = 0;
       let localNonZero = 0;
@@ -54,8 +57,9 @@ test("the analyser reads non-zero frequency data through the stream proxy", asyn
       }
       peak = Math.max(peak, localPeak);
       nonZeroBins = Math.max(nonZeroBins, localNonZero);
-      if (peak > 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Enough signal to satisfy the assertion below; no reason to keep going.
+      if (nonZeroBins > 32) break;
+      await new Promise((resolve) => setTimeout(resolve, 80));
     }
 
     return {

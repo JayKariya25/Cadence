@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
   devIndicators: false,
 
   images: {
+    /*
+      AVIF first, WebP second. The home page is mostly album artwork, and
+      artwork is exactly the kind of image AVIF compresses hardest — the
+      encode costs the server a little on first request and is cached from
+      then on.
+    */
+    formats: ["image/avif", "image/webp"],
+
     // Jamendo serves album artwork from its own CDN. Audio is a different
     // matter entirely: it is proxied through app/api/stream in Phase 1 so the
     // Web Audio AnalyserNode can read it without a cross-origin taint.
