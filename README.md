@@ -4,10 +4,10 @@ A music streaming app where **recommendations appear on intent, not by
 default**. Built on the Jamendo Creative Commons catalogue, so the audio is
 full-length and legally streamable.
 
-> **Status: Phase 5 of 8 complete.** Search-Scoped Discovery is live and the
-> rail beneath a search is personal — it learns what you play and every card
-> says why it is there. `/stats` now reports what you actually listened to,
-> computed entirely by MongoDB, with a poster you can export as a PNG. This README is expanded into the project's main surface
+> **Status: Phase 6 of 8 complete.** All three headline features are in.
+> Search-Scoped Discovery is live and personal, `/stats` reports what you
+> actually listened to entirely from MongoDB aggregations, and listen-together
+> rooms keep two browsers on the same second of the same track. This README is expanded into the project's main surface
 > (demo GIFs, architecture diagram, algorithm explanation) in Phase 8. See
 > [SPEC.md](SPEC.md) for the full specification and phase checklist.
 
@@ -50,6 +50,9 @@ full-length and legally streamable.
   a MongoDB aggregation pipeline; nothing is added up in JavaScript.
 - **A poster you can share** — drawn onto a canvas and downloaded as a real
   1080×1350 PNG, not a screenshot.
+- **Listen-together rooms** — a six-character code, genuinely synced playback,
+  a shared queue anybody can add to, chat, and host promotion. Measured at
+  **0.21s apart** between two browsers in the automated test.
 
 ---
 
@@ -101,7 +104,7 @@ Open <http://localhost:3000>.
 
 | Command | Does |
 | --- | --- |
-| `npm run dev` | Next.js and the realtime server together, via `concurrently` |
+| `npm run dev` | Next.js **and** the realtime server together, via `concurrently` |
 | `npm run seed` | Fills the catalogue; safe to re-run, skips covered moods |
 | `npm run seed -- --force` | Refetches everything, ignoring the cache TTL |
 | `npm run typecheck` | `tsc --noEmit` across the app and `/realtime` |
@@ -201,6 +204,51 @@ produces the same image on every machine and adds no dependency.
 
 ---
 
+## Two browsers, one second
+
+A room keeps everybody on the same moment of the same track. The interesting
+part is not the WebSocket; it is deciding whose clock is right.
+
+**The server is the authority, the host is only the input.** The host's player
+reports `{ trackId, positionMs, isPlaying }` on every transport change and on a
+5-second heartbeat. The realtime process stamps that against *its own* clock and
+broadcasts the projection. Followers never take a position from the host
+directly, and two things fall out of that: somebody joining halfway through a
+track lands in the right place without the host doing anything, and a host on a
+bad connection makes itself late rather than dragging everyone with it.
+
+**Each client works out its own offset.** A ping/pong round trip gives
+`offset = serverTime + rtt/2 - received`, and the client keeps the **median** of
+five samples — a median, not a mean, so one congested packet cannot move the
+room.
+
+**Correction is deliberately rare.** A follower checks itself once a second and
+seeks only when it is more than **750ms** out. That tolerance is chosen, not
+minimised: seeking an `<audio>` element is audible, so correcting a 50ms error
+would trade an inaudible offset for a constant stutter. The room shows you the
+measured drift rather than a green dot, because "in sync" is a claim and a
+number is evidence.
+
+**A follower's transport is locked, not corrected.** While following, the player
+store refuses play, pause and seek outright. Letting a guest pause and pulling
+them back on the next heartbeat means the button appears to work for five
+seconds before the room yanks it away — worse than a button that is plainly not
+yours. Volume stays local; listening together is not sharing a volume knob.
+
+**The socket authenticates with a ticket, not a cookie.** The realtime server is
+a different origin and cannot read the Auth.js session — the cookie is
+`httpOnly`, so the browser cannot hand it over, and `SameSite=Lax`, so a
+cross-origin handshake would not carry it anyway. The web app mints a
+60-second HMAC ticket naming the user and one room. See
+[`realtime/README.md`](realtime/README.md).
+
+All of this is verified by [`e2e/listen-together.spec.ts`](e2e/listen-together.spec.ts),
+which opens **two isolated browser contexts**, puts them in one room, and reads
+`currentTime` off both `<audio>` elements. A sync feature cannot be tested from
+a single page.
+
+---
+
 ## Architecture notes
 
 **The realtime server is a separate process.** App Router route handlers are
@@ -266,7 +314,7 @@ vector the entire recommendation engine is built on.
 | 3 | **Search-Scoped Discovery** | ✅ |
 | 4 | **Explainable recommender** | ✅ |
 | 5 | **Listening stats from aggregation pipelines** | ✅ |
-| 6 | **Listen-together rooms** | — |
+| 6 | **Listen-together rooms** | ✅ |
 | 7 | Lyrics and canvas visualizer | — |
 | 8 | Polish, tests, CI, and the README as a product surface | — |
 
@@ -298,6 +346,14 @@ vector the entire recommendation engine is built on.
   and wrong for a hosted one, which would have to pass the client's zone.
 - A range that begins with silence starts its chart at your first day of
   listening rather than at the range's edge.
+- Rooms are open to anybody with the code — the code is the credential. There
+  is no invite list.
+- Room state lives in a single process. Scaling past one instance would need a
+  Socket.io adapter; out of scope for a project that runs locally.
+- A room's shared queue is the host's queue: guests can append, but reordering
+  and removing belong to whoever is hosting.
+- `e2e/listen-together.spec.ts` needs the realtime server running. `npm run dev`
+  starts it; `next dev` alone makes that spec fail at the handshake.
 - There is no "Made for you" home row and no Weekly Mix. Both were in the
   original plan; both contradict the one opinion this project has, so the
   engine stayed and the surfaces did not. See decision D26 in [SPEC.md](SPEC.md).

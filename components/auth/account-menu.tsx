@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BarChart3, Heart, ListMusic, LogOut, SlidersHorizontal, User as UserIcon } from "lucide-react";
+import { BarChart3, Heart, ListMusic, LogOut, Radio, SlidersHorizontal, User as UserIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -70,6 +70,12 @@ export function AccountMenu({
           <Link href="/library">
             <ListMusic className="h-4 w-4" />
             Your Library
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/rooms">
+            <Radio className="h-4 w-4" />
+            Listen together
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>

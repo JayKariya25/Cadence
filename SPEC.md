@@ -1,7 +1,7 @@
 # Cadence — specification
 
 The source of truth for this project. Phases amend this file rather than
-re-deriving intent. Last updated at the end of **Phase 5** (2026-09-12).
+re-deriving intent. Last updated at the end of **Phase 6** (2026-09-14).
 
 ---
 
@@ -139,6 +139,12 @@ upserted into Track first, so Phase 3 can `$lookup` in one stage.
 `code` (6 chars, unique) · `hostId` · `memberIds[]` · `currentTrackId?` ·
 `positionMs` · `isPlaying` · `queue[]` · `lastSyncAt` · timestamps.
 
+The **durable shadow** of a room, not its live state. The realtime process
+holds rooms in memory — that is what makes sync cheap — and writes this on a
+3-second debounce so the database is never in the path of a heartbeat. It is
+read back only when a room is first opened after a restart, and a rehydrated
+room never resumes playing (D41).
+
 ### GridFS: playlistCovers.files / playlistCovers.chunks
 Uploaded playlist covers. Created by the driver, not by a Mongoose schema.
 Cadence depends on no third-party service beyond Jamendo, so covers live in the
@@ -258,11 +264,27 @@ the streak, not the zero-filled quiet days. Notable stages:
 | `tags` | `$setWindowFields` for the range total, so shares are of *all* listening rather than of the eight shown |
 | `top` | `$limit` before `$lookup` — join ten tracks, not every track ever played |
 
+### Rooms — `lib/rooms.ts`, `lib/room-ticket.ts`, `lib/room-protocol.ts` (built, Phase 6)
+
+`lib/rooms.ts` (server-only): `createRoom` · `findRoom` · `getRoomsHostedBy` ·
+`issueRoomTicket`. Codes are drawn with `randomInt` from a 32-character
+alphabet with no I, O, 0 or 1, and the unique index — not the existence check —
+is what makes creation safe under a race.
+
+`lib/room-ticket.ts` and `lib/room-protocol.ts` are **imported by both
+processes** and depend on nothing but `node:crypto` and a type. One definition
+of the signature format and one definition of the wire protocol; two would
+eventually disagree.
+
+`lib/room-protocol.ts` also holds the two pure functions the sync rests on —
+`projectedPosition` and `medianOffset` — which is why they are unit-tested.
+
 ### Server Actions — `app/actions/` (built, Phase 2)
 
 `likes.ts` (`setLikeAction`) · `playlists.ts` (create, rename, visibility,
 delete, add/remove track, reorder, cover upload) · `playlist-picker.ts` ·
-`session.ts` · `taste.ts` (`saveTastePicksAction`, Phase 4). Every mutation re-verifies ownership; the proxy's redirect is a
+`session.ts` · `taste.ts` (`saveTastePicksAction`, Phase 4) · `rooms.ts`
+(`createRoomAction`, `joinRoomAction`, Phase 6). Every mutation re-verifies ownership; the proxy's redirect is a
 convenience, never the authorisation boundary.
 
 ### Library reads — `lib/library.ts`, `lib/playlists.ts` (built, Phase 2)
@@ -288,6 +310,8 @@ convenience, never the authorisation boundary.
 | `app/api/search` | 3 | ✅ Tracks/artists/albums/playlists + the discovery rail |
 | `app/api/recommendations` | 4 | ✅ Scored feed with reason strings; the radio's source. Reachable only from search |
 | `app/welcome` | 4 | ✅ Cold-start taste picker |
+| `app/api/rooms/ticket` | 6 | ✅ Mints a 60-second HMAC handshake ticket. The authorisation boundary for the whole feature |
+| `app/rooms`, `app/rooms/[code]` | 6 | ✅ Room lobby and room |
 | `app/stats` | 5 | ✅ Listening statistics. A page, not an API route — see D32 |
 | `proxy.ts` | 2 | ✅ Route protection — **Next 16 renamed `middleware.ts` to `proxy.ts`**, and it now runs on the Node.js runtime |
 
@@ -357,9 +381,15 @@ convenience, never the authorisation boundary.
       drawn to a canvas and exported as a real 1080×1350 PNG. Guarded by
       `e2e/stats.spec.ts`, which seeds history through the live `/api/plays`
       endpoint and asserts the PNG's magic bytes and dimensions.
-- [ ] **Phase 6 — Listen-together rooms.** Socket.io in `/realtime`, handshake
-      auth, 6-char codes, drift-corrected sync (seek only above 750ms), shared
-      queue, chat, host promotion.
+- [x] **Phase 6 — Listen-together rooms.** Socket.io in `/realtime` with
+      ticket-based handshake auth (D38), six-character codes, the server as
+      playback authority (D39), per-client median clock-offset estimation,
+      drift correction only above 750ms, a shared queue anybody can add to,
+      chat, host promotion and automatic promotion when a host leaves. The
+      follower lock (D40) makes a guest's transport plainly not theirs rather
+      than briefly theirs. Verified by `e2e/listen-together.spec.ts`, which
+      puts two real browser contexts in one room and reads `currentTime` off
+      both `<audio>` elements — **0.21s apart, "In sync · 205ms"**.
 - [ ] **Phase 7 — Lyrics and visualizer.** Lyrics panel, `.lrc` upload,
       canvas visualizer with two modes, artwork-sampled colour,
       `prefers-reduced-motion` respected.
@@ -614,6 +644,51 @@ buckets and invent days a few hours out. `bounds: "full"` steps from the first
 real bucket instead. The cost is that a range beginning in silence starts its
 axis at the first day with something to show.
 
+**D38 — Rooms authenticate with a ticket, not a cookie.** The realtime process
+is a different origin and cannot read the Auth.js session: the cookie is
+`httpOnly`, so the browser cannot hand it over, and `SameSite=Lax`, so a
+cross-origin WebSocket handshake would not carry it regardless. The web app
+mints a 60-second HMAC ticket naming the user and *one* room; the socket
+presents it in its handshake. The realtime process then needs no knowledge of
+Auth.js, cookie names, or the JWE format — one shared secret and an HMAC. The
+signing key is derived from `AUTH_SECRET` rather than being it, so a leaked
+room ticket is not a step towards forging a session.
+
+**D39 — The server is the playback authority; the host is only the input.**
+The host reports where its player is; the realtime process stamps that against
+its *own* clock and broadcasts a projection. Followers never take a position
+from the host directly. Two things follow: somebody joining halfway through a
+track lands in the right place without the host doing anything, and a host on
+a slow connection makes itself late rather than dragging the room. Each client
+separately estimates its offset from the server clock over a ping/pong round
+trip and keeps the **median** of five samples, so one congested packet cannot
+move the room.
+
+**D40 — A follower's transport is locked, not corrected.** The player store
+refuses `play`, `pause`, `seek`, `next` and the rest while following somebody
+else's room; the room client drives playback through `applyRoom*`, which
+bypasses the lock. The alternative — letting a guest pause and pulling them
+back on the next heartbeat — means the button appears to work for up to five
+seconds before the room yanks it back, which is worse than a button that is
+plainly not yours. Volume stays local: listening together is not sharing a
+volume knob.
+
+**D41 — A rehydrated room never resumes playing.** Nobody is listening yet, and
+a room that "has been playing" since a restart three days ago would project a
+position hours into a four-minute track.
+
+**D42 — Joining a room is behind a button.** Browsers will not start audio
+without a user gesture, so a room that connected on mount would drop a follower
+into a playing track with silent output and no explanation. One click buys the
+gesture.
+
+**D43 — Seeks are deferred to `loadedmetadata` when the media is not ready.**
+Assigning `currentTime` before the browser knows a resource's duration is
+silently dropped — there is nothing to seek within — and playback then starts
+from zero. Invisible for an ordinary scrub, because there is always a loaded
+track underneath; found by the two-browser room test, where the track and the
+seek arrive in the same tick and a guest was landing 4.6s behind the host.
+
 ---
 
 ## 9. Known limitations
@@ -655,5 +730,16 @@ axis at the first day with something to show.
   begins at the first day with listening rather than at the range's edge.
 - **`/stats` runs seven queries per view.** Concurrent and all index-backed, but
   there is no caching layer: every range change re-queries.
+- **Rooms are open to anybody with the code.** There is no invite list: the
+  code is the credential. A ticket admits its bearer to exactly one room, but
+  any signed-in user who has the code can get one.
+- **Room state lives in one process.** Scaling `/realtime` past a single
+  instance would need a Socket.io adapter (Redis or Mongo) so rooms are visible
+  across instances. Out of scope for a locally-run project.
+- **A room's shared queue is the host's queue.** A guest can append but cannot
+  reorder or remove, and the host reordering locally rewrites it for everyone.
+- **`e2e/listen-together.spec.ts` needs the realtime server running.**
+  `npm run dev` starts it; running only `next dev` makes that spec fail at the
+  handshake.
 - **The analyser test hook is development-only.** `window.__cadenceAnalyser` is
   set only when `NODE_ENV !== "production"`; the Playwright gate depends on it.

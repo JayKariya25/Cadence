@@ -108,6 +108,12 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 >
                   Listening
                 </Link>
+                <Link
+                  href="/rooms"
+                  className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
+                >
+                  Rooms
+                </Link>
               </nav>
             )}
 

@@ -13,6 +13,11 @@
  * `queue` is the canonical track list and never reorders. `order` is a
  * permutation of its indices, which is what shuffle rewrites, so turning
  * shuffle off restores the original sequence exactly rather than approximately.
+ *
+ * Phase 6 adds one more idea: a room. While following somebody else's room the
+ * transport is theirs, so the local controls stop mutating state and the room
+ * client drives playback through `applyRoom*` instead. Volume stays local —
+ * listening together is not the same as sharing a volume knob.
  */
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
@@ -40,6 +45,11 @@ interface PlayerState {
   seekNonce: number;
   seekTargetMs: number;
 
+  /** The room being listened to, or null. */
+  roomCode: string | null;
+  /** Whether this listener controls that room's transport. */
+  isRoomHost: boolean;
+
   playTracks(
     tracks: readonly TrackView[],
     startIndex: number,
@@ -62,10 +72,40 @@ interface PlayerState {
   jumpTo(orderIndex: number): void;
   clearQueue(): void;
 
+  /** Room wiring. Called by the room client, not by the UI. */
+  enterRoom(code: string, isHost: boolean): void;
+  exitRoom(): void;
+  setRoomHost(isHost: boolean): void;
+  /** Applies the room's authoritative queue. Bypasses the follower lock. */
+  applyRoomQueue(tracks: readonly TrackView[], index: number): void;
+  /** Applies the room's authoritative transport. Bypasses the follower lock. */
+  applyRoomPlayback(playback: {
+    trackId: string | null;
+    positionMs: number;
+    isPlaying: boolean;
+  }): void;
+  /** Drift correction. Bypasses the follower lock; never called by the UI. */
+  applyRoomSeek(ms: number): void;
+
   /** Engine-only reporters. Not for UI use. */
   reportPosition(ms: number): void;
   reportDuration(ms: number): void;
   reportEnded(): void;
+}
+
+/**
+ * True while this listener is following somebody else's room.
+ *
+ * Every transport action checks it. The alternative — letting a follower pause
+ * locally and correcting them on the next heartbeat — means the button appears
+ * to work for up to five seconds before the room yanks it back, which is worse
+ * than a button that plainly is not yours.
+ */
+function isFollower(state: {
+  roomCode: string | null;
+  isRoomHost: boolean;
+}): boolean {
+  return state.roomCode !== null && !state.isRoomHost;
 }
 
 function shuffled(indices: readonly number[]): number[] {
@@ -107,9 +147,12 @@ export const usePlayerStore = create<PlayerState>()(
       source: "library",
       seekNonce: 0,
       seekTargetMs: 0,
+      roomCode: null,
+      isRoomHost: false,
 
       playTracks(tracks, startIndex, source) {
         if (tracks.length === 0) return;
+        if (isFollower(get())) return;
         const safeIndex = Math.min(Math.max(0, startIndex), tracks.length - 1);
         const { shuffle } = get();
         const order = buildOrder(tracks.length, shuffle, safeIndex);
@@ -125,22 +168,23 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       togglePlay() {
-        if (get().queue.length === 0) return;
+        if (get().queue.length === 0 || isFollower(get())) return;
         set((state) => ({ isPlaying: !state.isPlaying }));
       },
 
       play() {
-        if (get().queue.length === 0) return;
+        if (get().queue.length === 0 || isFollower(get())) return;
         set({ isPlaying: true });
       },
 
       pause() {
+        if (isFollower(get())) return;
         set({ isPlaying: false });
       },
 
       next({ auto = false } = {}) {
         const { order, orderIndex, repeat } = get();
-        if (order.length === 0) return;
+        if (order.length === 0 || isFollower(get())) return;
 
         // Repeat-one only applies when a track ended on its own. Pressing next
         // should still move on, which is what every player does.
@@ -179,7 +223,7 @@ export const usePlayerStore = create<PlayerState>()(
 
       previous() {
         const { orderIndex, positionMs, repeat, order } = get();
-        if (order.length === 0) return;
+        if (order.length === 0 || isFollower(get())) return;
 
         if (positionMs > RESTART_THRESHOLD_MS) {
           set((state) => ({
@@ -217,6 +261,7 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       seek(ms) {
+        if (isFollower(get())) return;
         const { durationMs } = get();
         const clamped = Math.max(0, durationMs > 0 ? Math.min(ms, durationMs) : ms);
         set((state) => ({
@@ -247,6 +292,7 @@ export const usePlayerStore = create<PlayerState>()(
 
       toggleShuffle() {
         const { shuffle, order, orderIndex, queue } = get();
+        if (isFollower(get())) return;
         const nextShuffle = !shuffle;
         if (queue.length === 0) {
           set({ shuffle: nextShuffle });
@@ -270,12 +316,14 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       cycleRepeat() {
+        if (isFollower(get())) return;
         const cycle: RepeatMode[] = ["off", "all", "one"];
         const current = cycle.indexOf(get().repeat);
         set({ repeat: cycle[(current + 1) % cycle.length] ?? "off" });
       },
 
       enqueue(track) {
+        if (isFollower(get())) return;
         set((state) => ({
           queue: [...state.queue, track],
           order: [...state.order, state.queue.length],
@@ -285,6 +333,7 @@ export const usePlayerStore = create<PlayerState>()(
       removeAt(queueIndex) {
         const { queue, order, orderIndex } = get();
         if (queueIndex < 0 || queueIndex >= queue.length) return;
+        if (isFollower(get())) return;
 
         const currentTrackIndex = order[orderIndex];
         const nextQueue = queue.filter((_, index) => index !== queueIndex);
@@ -316,10 +365,12 @@ export const usePlayerStore = create<PlayerState>()(
       jumpTo(orderIndex) {
         const { order } = get();
         if (orderIndex < 0 || orderIndex >= order.length) return;
+        if (isFollower(get())) return;
         set({ orderIndex, positionMs: 0, durationMs: 0, isPlaying: true });
       },
 
       clearQueue() {
+        if (isFollower(get())) return;
         set({
           queue: [],
           order: [],
@@ -328,6 +379,68 @@ export const usePlayerStore = create<PlayerState>()(
           positionMs: 0,
           durationMs: 0,
         });
+      },
+
+      enterRoom(code, isHost) {
+        // Shuffle and repeat are per-listener settings that would desynchronise
+        // a room the moment anybody's queue advanced. They are switched off on
+        // entry and left off; the room's order is the host's order.
+        set({ roomCode: code, isRoomHost: isHost, shuffle: false, repeat: "off" });
+      },
+
+      exitRoom() {
+        set({ roomCode: null, isRoomHost: false });
+      },
+
+      setRoomHost(isHost) {
+        set({ isRoomHost: isHost });
+      },
+
+      applyRoomQueue(tracks, index) {
+        const safeIndex = Math.min(Math.max(0, index), Math.max(0, tracks.length - 1));
+        const current = get();
+        const currentTrackId = selectCurrentTrack(current)?.id;
+        const nextTrackId = tracks[safeIndex]?.id;
+
+        set({
+          queue: [...tracks],
+          order: Array.from({ length: tracks.length }, (_, i) => i),
+          orderIndex: safeIndex,
+          // Only reset the clock when the track actually changed. A guest
+          // appending to the queue must not restart what is playing.
+          ...(currentTrackId === nextTrackId
+            ? {}
+            : { positionMs: 0, durationMs: 0 }),
+        });
+      },
+
+      applyRoomPlayback({ trackId, positionMs, isPlaying }) {
+        const state = get();
+        const targetIndex = state.queue.findIndex((track) => track.id === trackId);
+        const currentTrackId = selectCurrentTrack(state)?.id;
+
+        if (targetIndex >= 0 && currentTrackId !== trackId) {
+          set({
+            orderIndex: state.order.indexOf(targetIndex),
+            positionMs,
+            durationMs: 0,
+            seekTargetMs: positionMs,
+            seekNonce: state.seekNonce + 1,
+            isPlaying,
+          });
+          return;
+        }
+
+        set({ isPlaying });
+      },
+
+      applyRoomSeek(ms) {
+        const clamped = Math.max(0, ms);
+        set((state) => ({
+          positionMs: clamped,
+          seekTargetMs: clamped,
+          seekNonce: state.seekNonce + 1,
+        }));
       },
 
       reportPosition(ms) {
@@ -339,6 +452,9 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       reportEnded() {
+        // A follower's track ending is not a cue to advance: the host's own
+        // track will end a moment later and the room will move everybody.
+        if (isFollower(get())) return;
         get().next({ auto: true });
       },
     }),

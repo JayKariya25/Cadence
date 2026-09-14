@@ -64,6 +64,14 @@ export function AudioEngine() {
         // track that just started. Only act if we are still on the same one.
         const state = usePlayerStore.getState();
         if (selectCurrentTrack(state)?.streamUrl !== streamUrl) return;
+
+        // Following a room, the transport is not ours to stop: the room says
+        // this is playing, so pausing would only desynchronise us silently.
+        // Autoplay is the usual cause, so say what will fix it.
+        if (state.roomCode !== null && !state.isRoomHost) {
+          toast("Tap the page to start listening along.");
+          return;
+        }
         state.pause();
       });
     } else {
@@ -81,7 +89,24 @@ export function AudioEngine() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || seekNonce === 0) return;
-    audio.currentTime = seekTargetMs / 1000;
+    const target = seekTargetMs / 1000;
+
+    // Assigning currentTime before the browser knows the resource's duration
+    // is silently dropped: the element has nothing to seek within, and once
+    // metadata arrives it starts from zero regardless. That is invisible for a
+    // normal scrub — there is always a loaded track underneath — but it is
+    // exactly the case when a listener joins a room mid-song, where the track
+    // and the seek arrive in the same tick. So defer to `loadedmetadata`.
+    if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      audio.currentTime = target;
+      return;
+    }
+
+    const apply = () => {
+      audio.currentTime = target;
+    };
+    audio.addEventListener("loadedmetadata", apply, { once: true });
+    return () => audio.removeEventListener("loadedmetadata", apply);
   }, [seekNonce, seekTargetMs]);
 
   useEffect(() => {

@@ -15,24 +15,12 @@ import { CatalogueFetch, Track, type TrackDocument } from "@/models";
 import { getAlbumTracks, getArtistTracks } from "./jamendo";
 import { upsertTracks } from "./track-cache";
 import { MOODS, type Mood } from "./moods";
-import type { TrackView } from "./track-view";
+import { toTrackView, type TrackView } from "./track-view";
 
 export type { TrackView };
-
-export function toTrackView(track: TrackDocument): TrackView {
-  return {
-    id: String(track._id),
-    jamendoId: track.jamendoId,
-    name: track.name,
-    artistId: track.artistId,
-    artistName: track.artistName,
-    albumId: track.albumId,
-    albumName: track.albumName,
-    artworkUrl: track.artworkUrl,
-    duration: track.duration,
-    streamUrl: `/api/stream/${track.jamendoId}`,
-  };
-}
+// Defined in `track-view.ts` so `/realtime`, which has no access to the
+// server-only modules here, maps a Track document the same way this does.
+export { toTrackView };
 
 /** Newest-cached first is a stable, meaningful order for a curated row. */
 const MOOD_ROW_LIMIT = 20;
