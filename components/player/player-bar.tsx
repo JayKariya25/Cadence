@@ -13,6 +13,7 @@
  */
 import Link from "next/link";
 import {
+  ChevronUp,
   Pause,
   Play,
   Repeat,
@@ -32,6 +33,7 @@ import { cn } from "@/lib/utils";
 import { LikeButton } from "@/components/library/like-button";
 import { Artwork } from "./artwork";
 import { QueueDrawer } from "./queue-drawer";
+import { useNowPlaying } from "./now-playing-store";
 import {
   selectCurrentTrack,
   selectHasNext,
@@ -139,17 +141,38 @@ export function PlayerBar() {
   const RepeatIcon = repeat === "one" ? Repeat1 : Repeat;
 
   return (
-    <div className="sticky bottom-0 z-30 border-t border-hairline bg-background/95 backdrop-blur">
+    /* Above the now-playing overlay (z-40) on purpose: the transport has to
+       stay reachable from inside it, which is why that view reserves space at
+       the bottom rather than drawing its own controls. */
+    <div className="sticky bottom-0 z-50 border-t border-hairline bg-background/95 backdrop-blur">
       <ProgressLine />
       <div className="mx-auto flex w-full max-w-[1600px] items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5">
         {/* Now playing */}
         <div className="flex min-w-0 flex-1 items-center gap-3 md:w-[30%] md:flex-none">
-          <Artwork
-            src={track.artworkUrl}
-            alt=""
-            sizes="56px"
-            className="h-12 w-12 shrink-0 sm:h-14 sm:w-14"
-          />
+          {/*
+            The artwork is the affordance for the full view, the way it is in
+            every player people already use — rather than a separate button
+            competing for room in a bar that is already tight on a phone.
+          */}
+          <button
+            type="button"
+            onClick={useNowPlaying.getState().show}
+            aria-label={`Open now playing for ${track.name}`}
+            className="group relative shrink-0 rounded focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          >
+            <Artwork
+              src={track.artworkUrl}
+              alt=""
+              sizes="56px"
+              className="h-12 w-12 sm:h-14 sm:w-14"
+            />
+            <span
+              aria-hidden
+              className="absolute inset-0 grid place-items-center rounded bg-background/60 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </span>
+          </button>
           <div className="min-w-0">
             <div className="truncate text-sm font-medium">{track.name}</div>
             <Link

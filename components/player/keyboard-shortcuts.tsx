@@ -9,6 +9,7 @@
  */
 import { useEffect } from "react";
 import { usePlayerStore } from "./player-store";
+import { useNowPlaying } from "./now-playing-store";
 
 const SEEK_STEP_MS = 5_000;
 const VOLUME_STEP = 0.05;
@@ -54,6 +55,13 @@ export function KeyboardShortcuts() {
         case "M":
           event.preventDefault();
           store.toggleMute();
+          break;
+        case "l":
+        case "L":
+          // Lyrics and the visualizer live in the same view, and "L" is the
+          // letter people reach for when they want words on screen.
+          event.preventDefault();
+          useNowPlaying.getState().toggle();
           break;
         default:
           break;

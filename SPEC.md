@@ -1,7 +1,7 @@
 # Cadence — specification
 
 The source of truth for this project. Phases amend this file rather than
-re-deriving intent. Last updated at the end of **Phase 6** (2026-09-14).
+re-deriving intent. Last updated at the end of **Phase 7** (2026-09-14).
 
 ---
 
@@ -80,7 +80,9 @@ top-level indexed arrays rather than a nested API blob.
 | `shareUrl` | string? | |
 | `genres[]`, `instruments[]`, `moods[]` | string[] | from `musicinfo.tags` |
 | `vocalinstrumental`, `acousticelectric`, `speed` | enum? | validated against Jamendo's vocabulary |
-| `lang`, `lyrics` | string? | |
+| `lang`, `lyrics` | string? | `lyrics` is Jamendo's plain text — sparse (D44) |
+| `lrc`, `lrcUpdatedAt`, `lrcUpdatedBy` | string?/Date?/ObjectId? | An uploaded timed lyric file, stored raw (D45) |
+| `lyricsCheckedAt` | Date? | When Jamendo was last asked. Distinct from having lyrics |
 | `releaseDate` | Date? | |
 | `moodSlugs[]` | string[] | curated mood rows, assigned by the seed |
 | `audioAvailable` | boolean? | false when the audio is gone from Jamendo's storage |
@@ -279,12 +281,38 @@ eventually disagree.
 `lib/room-protocol.ts` also holds the two pure functions the sync rests on —
 `projectedPosition` and `medianOffset` — which is why they are unit-tested.
 
+### Lyrics — `lib/lrc.ts`, `lib/lyrics.ts` (built, Phase 7)
+
+`lib/lrc.ts` is pure and unit-tested: `parseLrc` · `isTimedLrc` ·
+`activeLineIndex` · `splitPlainLyrics`. The format looks trivial and is not —
+the fraction separator is sometimes a colon, one line may carry several
+timestamps because it repeats, a whole header is often written on one line, and
+an `[offset:]` tag shifts the file. `activeLineIndex` is a binary search
+because it runs on every `timeupdate`.
+
+`lib/lyrics.ts` (server-only): `getLyrics` · `saveLrc` · `clearLrc`. Prefers an
+uploaded `.lrc` over Jamendo's plain text, and asks Jamendo at most once a
+month per track.
+
+### Visualizer — `components/visualizer/` (built, Phase 7)
+
+`artwork-colour.ts` samples the sleeve through a 24×24 offscreen canvas and
+scores candidates on coverage weighted by saturation, discarding the extremes
+of brightness — the most *common* pixel in a sleeve is usually near-black or
+near-white, and a visualizer painted in either is invisible (D46).
+
+`visualizer-canvas.tsx` reads the Phase 1 AnalyserNode. Bars are grouped
+logarithmically: the analyser's 1024 bins are linear to Nyquist, which puts
+half of them above 11kHz and crowds every note anybody hums into the first
+fifty.
+
 ### Server Actions — `app/actions/` (built, Phase 2)
 
 `likes.ts` (`setLikeAction`) · `playlists.ts` (create, rename, visibility,
 delete, add/remove track, reorder, cover upload) · `playlist-picker.ts` ·
 `session.ts` · `taste.ts` (`saveTastePicksAction`, Phase 4) · `rooms.ts`
-(`createRoomAction`, `joinRoomAction`, Phase 6). Every mutation re-verifies ownership; the proxy's redirect is a
+(`createRoomAction`, `joinRoomAction`, Phase 6) · `lyrics.ts` (`lyricsAction`,
+Phase 7). Every mutation re-verifies ownership; the proxy's redirect is a
 convenience, never the authorisation boundary.
 
 ### Library reads — `lib/library.ts`, `lib/playlists.ts` (built, Phase 2)
@@ -312,6 +340,7 @@ convenience, never the authorisation boundary.
 | `app/welcome` | 4 | ✅ Cold-start taste picker |
 | `app/api/rooms/ticket` | 6 | ✅ Mints a 60-second HMAC handshake ticket. The authorisation boundary for the whole feature |
 | `app/rooms`, `app/rooms/[code]` | 6 | ✅ Room lobby and room |
+| `app/api/lyrics/[trackId]` | 7 | ✅ Lyrics for one track. Deliberately uncached (D47) |
 | `app/stats` | 5 | ✅ Listening statistics. A page, not an API route — see D32 |
 | `proxy.ts` | 2 | ✅ Route protection — **Next 16 renamed `middleware.ts` to `proxy.ts`**, and it now runs on the Node.js runtime |
 
@@ -390,9 +419,15 @@ convenience, never the authorisation boundary.
       than briefly theirs. Verified by `e2e/listen-together.spec.ts`, which
       puts two real browser contexts in one room and reads `currentTime` off
       both `<audio>` elements — **0.21s apart, "In sync · 205ms"**.
-- [ ] **Phase 7 — Lyrics and visualizer.** Lyrics panel, `.lrc` upload,
-      canvas visualizer with two modes, artwork-sampled colour,
-      `prefers-reduced-motion` respected.
+- [x] **Phase 7 — Lyrics and visualizer.** A full-screen now-playing view
+      opened from the player-bar artwork or with `L`: a canvas visualizer in
+      two modes (spectrum and waveform) tinted by a colour sampled from the
+      artwork, and a lyrics panel that follows an uploaded `.lrc` line by line,
+      highlights the current line, scrolls it into view and seeks on click.
+      `prefers-reduced-motion` stops the animation and offers to resume it.
+      Guarded by `e2e/lyrics-visualizer.spec.ts`, which compares two canvas
+      frames while audio plays — a canvas that *renders* is easy, a canvas fed
+      by the analyser is the claim.
 - [ ] **Phase 8 — Polish, tests, repository presentation.** Skeletons, error
       boundaries, empty states, rate limiting, Lighthouse ≥ 90, Vitest units,
       two Playwright flows, GitHub Actions, and the README as a product surface.
@@ -689,6 +724,41 @@ from zero. Invisible for an ordinary scrub, because there is always a loaded
 track underneath; found by the two-browser room test, where the track and the
 seek arrive in the same tick and a guest was landing 4.6s behind the host.
 
+**D44 — Jamendo's lyrics are sparse, and sometimes are not lyrics.** Spot
+checking vocal tracks in the catalogue, roughly one in six had anything, and
+one of those was a sentence of description ("Indian classical vocal aka Raga")
+rather than a lyric. There is no flag distinguishing the two, so the only
+available filter is shape: a real sheet has line breaks or is long. That
+sparseness is the honest reason the upload path exists.
+
+**D45 — Uploaded `.lrc` is stored raw, not pre-parsed.** The parser is a pure
+function that may be improved; keeping the source means every existing upload
+benefits rather than being frozen at whatever the parser understood on the day.
+Uploads are shared with everybody, because lyrics are a property of the
+recording and a per-user copy would mean transcribing a song helps one person.
+
+**D46 — Artwork colour is the most *useful* colour, not the most common.** The
+most common pixel in a sleeve is very often near-black or near-white.
+Candidates are scored on coverage weighted by saturation, with the extremes of
+brightness discarded and a dark winner lifted until it reads against the
+near-black ground.
+
+**D47 — `/api/lyrics/[trackId]` is not cached.** A 60-second private cache
+looked free and was not: an upload changes the response immediately, so the
+panel still said "no lyrics" straight after somebody added them, which reads as
+the upload having failed. The expensive part — asking Jamendo — is already
+cached in MongoDB by `lyricsCheckedAt`.
+
+**D48 — The Next.js dev indicator is switched off.** Its four possible
+positions are the four screen corners, and this app has a full-width fixed
+player bar: bottom-left is exactly the artwork button that opens the
+now-playing view, which the overlay made unclickable in development. Errors
+still surface in the terminal and in the error overlay, which is separate.
+
+**D49 — Seeks applied to a not-yet-ready media element wait for
+`loadedmetadata`.** Recorded in Phase 6 as D43; Phase 7 depends on it too,
+because clicking a lyric line seeks.
+
 ---
 
 ## 9. Known limitations
@@ -741,5 +811,13 @@ seek arrive in the same tick and a guest was landing 4.6s behind the host.
 - **`e2e/listen-together.spec.ts` needs the realtime server running.**
   `npm run dev` starts it; running only `next dev` makes that spec fail at the
   handshake.
+- **Most of the catalogue has no lyrics at all.** Jamendo supplies them for a
+  small minority; everything else needs somebody to upload an `.lrc`.
+- **Anybody signed in can overwrite anybody's `.lrc`.** There is no history, no
+  attribution beyond the file's own `[by:]` tag, and no moderation. Acceptable
+  for a project that runs locally; not for one that does not.
+- **The visualizer needs playback to have started once.** The Web Audio graph is
+  built on the first play, so opening the view before then shows the still
+  figure rather than a live one.
 - **The analyser test hook is development-only.** `window.__cadenceAnalyser` is
   set only when `NODE_ENV !== "production"`; the Playwright gate depends on it.

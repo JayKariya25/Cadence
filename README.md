@@ -4,10 +4,10 @@ A music streaming app where **recommendations appear on intent, not by
 default**. Built on the Jamendo Creative Commons catalogue, so the audio is
 full-length and legally streamable.
 
-> **Status: Phase 6 of 8 complete.** All three headline features are in.
-> Search-Scoped Discovery is live and personal, `/stats` reports what you
-> actually listened to entirely from MongoDB aggregations, and listen-together
-> rooms keep two browsers on the same second of the same track. This README is expanded into the project's main surface
+> **Status: Phase 7 of 8 complete.** All three headline features are in, plus
+> the now-playing view: a canvas visualizer tinted by the artwork, and lyrics
+> that follow the track line by line. Phase 8 is polish, CI and turning this
+> README into the project's front door. This README is expanded into the project's main surface
 > (demo GIFs, architecture diagram, algorithm explanation) in Phase 8. See
 > [SPEC.md](SPEC.md) for the full specification and phase checklist.
 
@@ -53,6 +53,12 @@ full-length and legally streamable.
 - **Listen-together rooms** — a six-character code, genuinely synced playback,
   a shared queue anybody can add to, chat, and host promotion. Measured at
   **0.21s apart** between two browsers in the automated test.
+- **A now-playing view** — press `L` or click the artwork. A canvas visualizer
+  in two modes, tinted with a colour sampled from the sleeve, and a lyrics
+  panel that highlights the current line and seeks when you click one.
+- **Timed lyrics you can add yourself** — upload an `.lrc` file. Most of this
+  catalogue has no lyrics anywhere, so this is usually the only way to get
+  them.
 
 ---
 
@@ -249,6 +255,50 @@ a single page.
 
 ---
 
+## The visualizer is the payoff of a Phase 1 decision
+
+Phase 1 proxied all audio through `app/api/stream` so the Web Audio
+`AnalyserNode` could read it without a cross-origin taint, and has been
+asserting `getByteFrequencyData` returns non-zero data ever since. This is what
+that was for.
+
+Two modes, because frequency and time answer different questions: **Spectrum**
+shows what the track is made of, **Waveform** shows what it is doing. The bars
+are grouped **logarithmically** — the analyser returns 1024 bins linearly
+spaced to Nyquist, which is the wrong shape for music: half of them describe
+11kHz and above, where almost nothing happens, while every note anybody hums is
+crowded into the first fifty.
+
+The colour is sampled from the album artwork through a 24×24 offscreen canvas.
+Candidates are scored on coverage *weighted by saturation*, with the extremes
+of brightness thrown away, because the most common pixel in a sleeve is very
+often near-black or near-white — and a visualizer painted in either is
+invisible rather than tasteful.
+
+`prefers-reduced-motion` stops the animation and draws a still figure instead,
+with a control to turn it back on for anybody who wants it.
+
+The test does not assert that the canvas renders — that is easy and proves
+nothing. It captures two frames while audio is playing and asserts **they
+differ**, which is the only way to tell a live visualizer from a decorative one.
+
+## Lyrics, and why you can upload them
+
+Jamendo supplies lyrics for a small minority of its catalogue — spot-checking
+vocal tracks, roughly one in six had anything, and one of those turned out to
+be a sentence of description rather than a lyric. So the upload path is not a
+nice extra; for most of this catalogue it is the only way words reach the
+screen, and the only way any of them arrive in time with the music.
+
+[`lib/lrc.ts`](lib/lrc.ts) is a pure module with 21 tests, because `.lrc` looks
+trivial and is not: the fraction separator is sometimes a colon, a repeated
+chorus is written once with several timestamps, a whole header is often on one
+line, and an `[offset:]` tag shifts the file. Finding the current line is a
+binary search — it runs four times a second against files that can be hundreds
+of lines long.
+
+---
+
 ## Architecture notes
 
 **The realtime server is a separate process.** App Router route handlers are
@@ -315,7 +365,7 @@ vector the entire recommendation engine is built on.
 | 4 | **Explainable recommender** | ✅ |
 | 5 | **Listening stats from aggregation pipelines** | ✅ |
 | 6 | **Listen-together rooms** | ✅ |
-| 7 | Lyrics and canvas visualizer | — |
+| 7 | **Lyrics and canvas visualizer** | ✅ |
 | 8 | Polish, tests, CI, and the README as a product surface | — |
 
 ## Known limitations
@@ -346,6 +396,11 @@ vector the entire recommendation engine is built on.
   and wrong for a hosted one, which would have to pass the client's zone.
 - A range that begins with silence starts its chart at your first day of
   listening rather than at the range's edge.
+- Most of the catalogue has no lyrics at all, and anybody signed in can
+  overwrite anybody's uploaded `.lrc`. There is no history and no moderation —
+  fine for something that runs locally, not for something that does not.
+- The visualizer needs playback to have started once: the Web Audio graph is
+  built on the first play.
 - Rooms are open to anybody with the code — the code is the credential. There
   is no invite list.
 - Room state lives in a single process. Scaling past one instance would need a

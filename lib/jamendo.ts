@@ -328,6 +328,34 @@ export async function searchTracks(
   );
 }
 
+export interface TracksByIdOptions {
+  ids: readonly string[];
+  include?: readonly string[];
+  audioformat?: string;
+}
+
+/**
+ * Fetches specific tracks by Jamendo id.
+ *
+ * Exists mainly for lyrics: they are not part of the default include, and
+ * asking for them on every catalogue request would enlarge every response for
+ * a field most tracks do not have.
+ */
+export async function getTracksByIds(
+  options: TracksByIdOptions,
+): Promise<JamendoResponse<JamendoTrack>> {
+  return jamendoRequest(
+    "/tracks",
+    {
+      id: options.ids,
+      limit: clampLimit(options.ids.length),
+      include: options.include ?? TRACK_INCLUDE,
+      audioformat: options.audioformat ?? "mp32",
+    },
+    jamendoTrackSchema,
+  );
+}
+
 export interface SimilarTracksOptions {
   /** Seed track's Jamendo id. */
   id: string;

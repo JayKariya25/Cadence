@@ -46,7 +46,24 @@ export interface TrackDocument {
   speed?: Speed;
   lang?: string;
   releaseDate?: Date;
+  /** Plain, untimed lyrics as Jamendo supplies them. Often absent. */
   lyrics?: string;
+  /**
+   * An uploaded `.lrc` file, stored as the raw text it arrived as.
+   *
+   * Raw rather than pre-parsed: the parser is a pure function that may be
+   * improved, and keeping the source means every existing upload benefits
+   * rather than being frozen at whatever the parser understood on the day.
+   */
+  lrc?: string;
+  lrcUpdatedAt?: Date;
+  lrcUpdatedBy?: Types.ObjectId;
+  /**
+   * When Jamendo was last asked for this track's lyrics. Distinct from having
+   * them: most tracks have none, and without this marker every view of such a
+   * track would ask again.
+   */
+  lyricsCheckedAt?: Date;
   /**
    * Curated mood rows this track belongs to, assigned by the seed script.
    *
@@ -91,6 +108,10 @@ const trackSchema = new Schema<TrackDocument>(
     lang: { type: String },
     releaseDate: { type: Date },
     lyrics: { type: String },
+    lrc: { type: String },
+    lrcUpdatedAt: { type: Date },
+    lrcUpdatedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    lyricsCheckedAt: { type: Date },
     moodSlugs: { type: [String], default: [], index: true },
     audioAvailable: { type: Boolean },
     audioCheckedAt: { type: Date },
